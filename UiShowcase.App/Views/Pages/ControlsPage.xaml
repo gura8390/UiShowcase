@@ -1,0 +1,281 @@
+<UserControl x:Class="UiShowcase.Views.Pages.ControlsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.AutomationId="ControlsPageRoot"
+             AutomationProperties.Name="控件与交互态页面">
+    <ScrollViewer Background="{DynamicResource BgCanvasBrush}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="{DynamicResource PagePadding}">
+            <!-- 按钮层级与交互态 -->
+            <Border Style="{StaticResource SurfaceCardStyle}" Margin="{DynamicResource SectionMargin}">
+                <StackPanel>
+                    <TextBlock Text="按钮层级与五态闭环（默认 / 悬停 / 按下 / 禁用 / 键盘焦点）"
+                               Style="{StaticResource H2TextStyle}" Margin="0,0,0,8" />
+                    <TextBlock Text="同一操作区最多只保留一个主按钮；所有按钮均已按方正公文楷体字形基线完成视觉居中校准。"
+                               Style="{StaticResource SecondaryTextStyle}" Margin="0,0,0,16" />
+
+                    <WrapPanel Margin="0,0,0,12">
+                        <Button Content="主操作按钮"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding TriggerDemoFeedbackCommand}"
+                                CommandParameter="主操作按钮"
+                                Margin="0,0,12,10"
+                                AutomationProperties.AutomationId="DemoPrimaryButton"
+                                AutomationProperties.Name="主操作按钮" />
+                        <Button Content="次操作按钮"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding TriggerDemoFeedbackCommand}"
+                                CommandParameter="次操作按钮"
+                                Margin="0,0,12,10"
+                                AutomationProperties.AutomationId="DemoSecondaryButton"
+                                AutomationProperties.Name="次操作按钮" />
+                        <Button Content="幽灵轻量按钮"
+                                Style="{StaticResource GhostButtonStyle}"
+                                Command="{Binding TriggerDemoFeedbackCommand}"
+                                CommandParameter="幽灵轻量按钮"
+                                Margin="0,0,12,10"
+                                AutomationProperties.AutomationId="DemoGhostButton"
+                                AutomationProperties.Name="幽灵轻量按钮" />
+                        <Button Content="危险操作按钮"
+                                Style="{StaticResource DangerButtonStyle}"
+                                Command="{Binding TriggerDemoFeedbackCommand}"
+                                CommandParameter="危险操作按钮"
+                                Margin="0,0,12,10"
+                                AutomationProperties.AutomationId="DemoDangerButton"
+                                AutomationProperties.Name="危险操作按钮" />
+                        <Button Content="禁用态主按钮"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                IsEnabled="False"
+                                Margin="0,0,12,10"
+                                AutomationProperties.AutomationId="DemoDisabledPrimaryButton"
+                                AutomationProperties.Name="禁用态主按钮" />
+                        <Button Content="禁用态次按钮"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                IsEnabled="False"
+                                Margin="0,0,12,10"
+                                AutomationProperties.AutomationId="DemoDisabledSecondaryButton"
+                                AutomationProperties.Name="禁用态次按钮" />
+                    </WrapPanel>
+
+                    <Border Background="{DynamicResource BgCanvasBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="14,10">
+                        <TextBlock Text="{Binding DemoActionFeedback}"
+                                   Style="{StaticResource SecondaryTextStyle}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,0,2"
+                                   AutomationProperties.AutomationId="DemoFeedbackText"
+                                   AutomationProperties.LiveSetting="Polite" />
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- 表单与内联报错 + 选择控件 -->
+            <Grid Margin="{DynamicResource SectionMargin}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 左侧：输入框与内联校验 -->
+                <Border Grid.Column="0" Style="{StaticResource SurfaceCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="输入框与内联校验错误" Style="{StaticResource H2TextStyle}" Margin="0,0,0,8" />
+                        <TextBlock Text="校验错误紧贴控件下方以「标记 + 中文原因」呈现，不单靠红色边框区分。"
+                                   Style="{StaticResource SecondaryTextStyle}" Margin="0,0,0,16" />
+
+                        <TextBlock Text="目标工作目录" Style="{StaticResource H3TextStyle}" FontSize="14" Margin="0,0,0,8" />
+                        <TextBox x:Name="DemoPathInput"
+                                 Text="{Binding DemoInputText, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="请输入绝对路径，例如 D:\Codex\UiShowcase"
+                                 Style="{StaticResource ModernTextBoxStyle}"
+                                 AutomationProperties.AutomationId="DemoPathTextBox"
+                                 AutomationProperties.Name="目标工作目录" />
+
+                        <Border Visibility="{Binding HasDemoValidationError, Converter={StaticResource BoolToVis}}"
+                                Background="{DynamicResource StatusDangerBgBrush}"
+                                BorderBrush="{DynamicResource StatusDangerBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="12,8"
+                                Margin="0,8,0,0">
+                            <TextBlock Text="{Binding DemoValidationMessage, StringFormat='[错误] {0}'}"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource StatusDangerBrush}"
+                                       TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="DemoInlineErrorText"
+                                       AutomationProperties.LiveSetting="Assertive" />
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,18">
+                            <Button Content="模拟非法输入"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="SimulateInvalidInput_Click"
+                                    Margin="0,0,10,0"
+                                    AutomationProperties.AutomationId="DemoSimulateErrorButton"
+                                    AutomationProperties.Name="模拟非法输入" />
+                            <Button Content="恢复合法路径"
+                                    Style="{StaticResource GhostButtonStyle}"
+                                    Click="RestoreValidInput_Click"
+                                    AutomationProperties.AutomationId="DemoRestoreValidButton"
+                                    AutomationProperties.Name="恢复合法路径" />
+                        </StackPanel>
+
+                        <TextBlock Text="下拉选择（深浅色弹层全适配）" Style="{StaticResource H3TextStyle}" FontSize="14" Margin="0,0,0,8" />
+                        <ComboBox ItemsSource="{Binding DemoComboOptions}"
+                                  SelectedItem="{Binding SelectedDemoOption}"
+                                  Style="{StaticResource ModernComboBoxStyle}"
+                                  AutomationProperties.AutomationId="DemoModeComboBox"
+                                  AutomationProperties.Name="校验策略下拉框" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 右侧：开关、分段选择、滑块 -->
+                <Border Grid.Column="2" Style="{StaticResource SurfaceCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="开关、分段选择与数值调节" Style="{StaticResource H2TextStyle}" Margin="0,0,0,16" />
+
+                        <CheckBox Content="保存配置时自动校验完整性"
+                                  IsChecked="{Binding DemoToggleA}"
+                                  Style="{StaticResource ToggleSwitchStyle}"
+                                  Margin="0,0,0,14"
+                                  AutomationProperties.AutomationId="DemoToggleSwitchA"
+                                  AutomationProperties.Name="保存配置时自动校验完整性" />
+
+                        <CheckBox Content="列表中仅展示存在异常的记录"
+                                  IsChecked="{Binding DemoToggleB}"
+                                  Style="{StaticResource ToggleSwitchStyle}"
+                                  Margin="0,0,0,22"
+                                  AutomationProperties.AutomationId="DemoToggleSwitchB"
+                                  AutomationProperties.Name="列表中仅展示存在异常的记录" />
+
+                        <TextBlock Text="分段选择（互斥模式切换）" Style="{StaticResource H3TextStyle}" FontSize="14" Margin="0,0,0,8" />
+                        <Border Background="{DynamicResource BgControlAltBrush}"
+                                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="3"
+                                HorizontalAlignment="Left"
+                                Margin="0,0,0,22">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Content="精确匹配"
+                                             GroupName="DemoSegment"
+                                             IsChecked="{Binding IsDemoSeg0}"
+                                             Style="{StaticResource SegmentRadioStyle}"
+                                             AutomationProperties.AutomationId="DemoSegment0"
+                                             AutomationProperties.Name="精确匹配" />
+                                <RadioButton Content="模糊检索"
+                                             GroupName="DemoSegment"
+                                             IsChecked="{Binding IsDemoSeg1}"
+                                             Style="{StaticResource SegmentRadioStyle}"
+                                             AutomationProperties.AutomationId="DemoSegment1"
+                                             AutomationProperties.Name="模糊检索" />
+                                <RadioButton Content="正则规则"
+                                             GroupName="DemoSegment"
+                                             IsChecked="{Binding IsDemoSeg2}"
+                                             Style="{StaticResource SegmentRadioStyle}"
+                                             AutomationProperties.AutomationId="DemoSegment2"
+                                             AutomationProperties.Name="正则规则" />
+                            </StackPanel>
+                        </Border>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="并发扫描阈值" Style="{StaticResource H3TextStyle}" FontSize="14" />
+                            <TextBlock Text="{Binding DemoSliderDisplay}"
+                                       Style="{StaticResource MonoTextStyle}"
+                                       Foreground="{DynamicResource AccentPrimaryBrush}"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Right" />
+                        </DockPanel>
+                        <Slider Minimum="10"
+                                Maximum="100"
+                                TickFrequency="5"
+                                IsSnapToTickEnabled="True"
+                                Value="{Binding DemoSliderValue}"
+                                Style="{StaticResource ModernSliderStyle}"
+                                AutomationProperties.AutomationId="DemoThresholdSlider"
+                                AutomationProperties.Name="并发扫描阈值滑块" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- 四态语义提示条 -->
+            <Border Style="{StaticResource SurfaceCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="状态反馈四件套（信息 / 成功 / 警告 / 错误）" Style="{StaticResource H2TextStyle}" Margin="0,0,0,16" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Grid.Column="0"
+                                Background="{DynamicResource StatusInfoBgBrush}"
+                                BorderBrush="{DynamicResource StatusInfoBorderBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="16,12">
+                            <StackPanel>
+                                <TextBlock Text="[信息] 系统已开启 DPI 自适应布局"
+                                           FontWeight="SemiBold" FontSize="14"
+                                           Foreground="{DynamicResource StatusInfoBrush}" Margin="0,0,0,5" />
+                                <TextBlock Text="窗口初始尺寸自动限制在工作区安全范围内，高缩放下不遮挡任务栏。"
+                                           Style="{StaticResource SecondaryTextStyle}"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="0" Grid.Column="2"
+                                Background="{DynamicResource StatusSuccessBgBrush}"
+                                BorderBrush="{DynamicResource StatusSuccessBorderBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="16,12">
+                            <StackPanel>
+                                <TextBlock Text="[成功] 本地设置已持久化保存"
+                                           FontWeight="SemiBold" FontSize="14"
+                                           Foreground="{DynamicResource StatusSuccessBrush}" Margin="0,0,0,5" />
+                                <TextBlock Text="重启应用后将自动恢复当前主题模式、强调色、界面密度与托盘行为。"
+                                           Style="{StaticResource SecondaryTextStyle}"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="2" Grid.Column="0"
+                                Background="{DynamicResource StatusWarningBgBrush}"
+                                BorderBrush="{DynamicResource StatusWarningBorderBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="16,12">
+                            <StackPanel>
+                                <TextBlock Text="[警告] 检测到 1 项需人工复核的旧版配置"
+                                           FontWeight="SemiBold" FontSize="14"
+                                           Foreground="{DynamicResource StatusWarningBrush}" Margin="0,0,0,5" />
+                                <TextBlock Text="警告色与强调色完全解耦，避免用户混淆正常高亮与风险提示。"
+                                           Style="{StaticResource SecondaryTextStyle}"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="2" Grid.Column="2"
+                                Background="{DynamicResource StatusDangerBgBrush}"
+                                BorderBrush="{DynamicResource StatusDangerBorderBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="16,12">
+                            <StackPanel>
+                                <TextBlock Text="[错误] 目标目录不可写或权限不足"
+                                           FontWeight="SemiBold" FontSize="14"
+                                           Foreground="{DynamicResource StatusDangerBrush}" Margin="0,0,0,5" />
+                                <TextBlock Text="面向用户的第三方英文异常须转换为可理解的中文说明与处理建议。"
+                                           Style="{StaticResource SecondaryTextStyle}"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

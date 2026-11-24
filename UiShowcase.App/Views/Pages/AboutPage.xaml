@@ -1,0 +1,83 @@
+<UserControl x:Class="UiShowcase.Views.Pages.AboutPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.AutomationId="AboutPageRoot"
+             AutomationProperties.Name="关于与环境页面">
+    <ScrollViewer Background="{DynamicResource BgCanvasBrush}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="{DynamicResource PagePadding}">
+            <Border Style="{StaticResource SurfaceCardStyle}" Margin="{DynamicResource SectionMargin}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Image Grid.Column="0"
+                           Source="pack://application:,,,/Assets/app.ico"
+                           Width="58"
+                           Height="58"
+                           Margin="0,0,20,0"
+                           VerticalAlignment="Top"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           AutomationProperties.Name="澄明界面展示应用图标" />
+
+                    <StackPanel Grid.Column="1">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,6">
+                            <TextBlock Text="{Binding AppTitle}" Style="{StaticResource H1TextStyle}" Margin="0,0,12,0" />
+                            <Border Background="{DynamicResource AccentSubtleBrush}"
+                                    BorderBrush="{DynamicResource AccentPrimaryBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="5"
+                                    Padding="10,2,10,4"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding AppVersion, StringFormat='v{0}'}"
+                                           Style="{StaticResource MonoTextStyle}"
+                                           FontSize="13"
+                                           FontWeight="Normal"
+                                           Foreground="{DynamicResource AccentPrimaryBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="本应用用于直观展示「澄明原生工具风」Windows 桌面 UI 设计规范的实际视觉与交互效果，采用系统原生 Microsoft YaHei UI 与 Cascadia Mono 分层排版并完成光学居中校准，基于 WPF (.NET 8) 与完整 UI Automation 无障碍语义实现。"
+                                   Style="{StaticResource BodyTextStyle}"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SurfaceCardStyle}" Margin="{DynamicResource SectionMargin}">
+                <StackPanel>
+                    <TextBlock Text="当前显示环境与高 DPI 自适应读数" Style="{StaticResource H2TextStyle}" Margin="0,0,0,12" />
+                    <Border Background="{DynamicResource BgCanvasBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="16,14">
+                        <TextBlock Text="{Binding DisplayMetricsText}"
+                                   Style="{StaticResource MonoTextStyle}"
+                                   LineHeight="24"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="AboutDisplayMetricsText" />
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SurfaceCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="规范核心特性摘要" Style="{StaticResource H2TextStyle}" Margin="0,0,0,12" />
+                    <TextBlock Text="1. 原生清晰字体与视觉居中：界面采用 Windows 原生 Microsoft YaHei UI，数据/路径/哈希采用 Cascadia Mono 等宽对齐，零外置字体包体积，并针对中文字形基线完成光学居中补偿。"
+                               Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8" />
+                    <TextBlock Text="2. 舒展留白与双密度档位：默认采用舒展的标准密度（充足外边距与卡片呼吸感），并支持一键切换紧凑密度。"
+                               Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8" />
+                    <TextBlock Text="3. 完整语义色板与双主题：补齐次级面板、控件底色、选中态、禁用态、警告与信息色，并原生支持浅色、深色、四组强调色与系统高对比度。"
+                               Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8" />
+                    <TextBlock Text="4. 全控件五态与键盘焦点规范：明确 2px 外描边键盘焦点框，视觉与无障碍验收保持一致。"
+                               Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8" />
+                    <TextBlock Text="5. 桌面工具交互骨架：单主按钮约束、空状态引导、可取消进度条、内联错误提示与动态工作区尺寸钳制。"
+                               Style="{StaticResource BodyTextStyle}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

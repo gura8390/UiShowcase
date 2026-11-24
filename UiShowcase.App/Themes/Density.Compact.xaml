@@ -1,0 +1,18 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 紧凑密度（全偶数 DIP：150% 缩放下无半像素抖动） -->
+    <GridLength x:Key="NavWidth">196</GridLength>
+    <Thickness x:Key="HeaderPadding">18,12</Thickness>
+    <Thickness x:Key="StatusBarPadding">14,6</Thickness>
+    <Thickness x:Key="PagePadding">16,12,16,16</Thickness>
+    <Thickness x:Key="CardPadding">14</Thickness>
+    <Thickness x:Key="PrimaryButtonPadding">14,4,14,6</Thickness>
+    <Thickness x:Key="SecondaryButtonPadding">12,4,12,6</Thickness>
+    <Thickness x:Key="InputPadding">10,4,10,6</Thickness>
+    <Thickness x:Key="ListItemPadding">10,6,10,8</Thickness>
+    <Thickness x:Key="SectionMargin">0,0,0,12</Thickness>
+    <Thickness x:Key="RowMargin">0,0,0,8</Thickness>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=mscorlib" x:Key="ControlMinHeight">30</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=mscorlib" x:Key="NavItemHeight">32</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=mscorlib" x:Key="BodyFontSize">12</sys:Double>
+</ResourceDictionary>

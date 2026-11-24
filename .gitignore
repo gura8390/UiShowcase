@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+*.user
+Tests/screenshots/
+Tests/isolated_run/
+UiShowcase.App/Fonts/
