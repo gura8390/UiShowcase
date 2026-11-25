@@ -1,7 +1,3 @@
-bin/
-obj/
-.vs/
-*.user
+/target/
 Tests/screenshots/
 Tests/isolated_run/
-UiShowcase.App/Fonts/

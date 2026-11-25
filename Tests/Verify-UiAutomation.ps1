@@ -4,21 +4,31 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 
-$exePath = "D:\Codex\UiShowcase\UiShowcase.App\bin\Release\net8.0-windows\UiShowcase.exe"
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeDpiCheck {
+    [DllImport("shcore.dll")]
+    public static extern int GetProcessDpiAwareness(IntPtr hprocess, out int value);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll")]
+    public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+}
+"@
+
+$exePath = "D:\Codex\UiShowcase\target\release\UiShowcase.exe"
 if (-not (Test-Path $exePath)) {
     throw "未找到可执行文件：$exePath"
 }
 
 $testDir = Join-Path "D:\Codex\UiShowcase\Tests" "isolated_run"
-$shotDir = Join-Path "D:\Codex\UiShowcase\Tests" "screenshots"
 if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force }
-if (Test-Path $shotDir) { Remove-Item $shotDir -Recurse -Force }
 New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-New-Item -ItemType Directory -Path $shotDir -Force | Out-Null
 
 $testConfigPath = Join-Path $testDir "settings.json"
 $testAutoRunName = "澄明界面展示_UIA验收临时项"
-$testMutexName = "UiShowcase_UIA_Test_$(Get-Random)"
+$testMutexName = "UiShowcase_Rust_UIA_$(Get-Random)"
 $runRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 
 $results = [System.Collections.Generic.List[string]]::new()
@@ -27,13 +37,14 @@ function Add-Pass([string]$msg) {
     Write-Host "[PASS] $msg" -ForegroundColor Green
 }
 
-function Find-WindowByPid([int]$pidTarget, [int]$timeoutMs = 8000) {
+function Find-WindowByPid([int]$pidTarget, [int]$timeoutMs = 10000) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $cond = New-Object System.Windows.Automation.AndCondition(
         (New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $pidTarget)),
         (New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::AutomationIdProperty, "MainAppWindow"))
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Window))
     )
     while ($sw.ElapsedMilliseconds -lt $timeoutMs) {
         $win = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
@@ -44,48 +55,48 @@ function Find-WindowByPid([int]$pidTarget, [int]$timeoutMs = 8000) {
     return $null
 }
 
-function Find-ById([System.Windows.Automation.AutomationElement]$root, [string]$id, [int]$timeoutMs = 4000) {
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $cond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
-    while ($sw.ElapsedMilliseconds -lt $timeoutMs) {
-        $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
-        if ($null -ne $el) { return $el }
-        Start-Sleep -Milliseconds 100
-    }
-    throw "未能在超时内找到 AutomationId='$id'"
-}
-
-function Find-ByName([System.Windows.Automation.AutomationElement]$root, [string]$name, [int]$timeoutMs = 3000) {
+function Find-ByName([System.Windows.Automation.AutomationElement]$root, [string]$name, [int]$timeoutMs = 4000) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $cond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::NameProperty, $name)
     while ($sw.ElapsedMilliseconds -lt $timeoutMs) {
         $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
         if ($null -ne $el) { return $el }
-        Start-Sleep -Milliseconds 100
+        Start-Sleep -Milliseconds 120
     }
     return $null
 }
 
-function Invoke-Button([System.Windows.Automation.AutomationElement]$el) {
-    $pat = $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    $pat.Invoke()
+function Find-ByNameContains([System.Windows.Automation.AutomationElement]$root, [string]$needle, [int]$timeoutMs = 4000) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt $timeoutMs) {
+        $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($el in $all) {
+            try {
+                if ($null -ne $el.Current.Name -and $el.Current.Name.Contains($needle)) { return $el }
+            } catch {}
+        }
+        Start-Sleep -Milliseconds 150
+    }
+    return $null
 }
 
-function Select-Item([System.Windows.Automation.AutomationElement]$el) {
-    $pat = $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-    $pat.Select()
-}
-
-function Get-IsSelected([System.Windows.Automation.AutomationElement]$el) {
-    $pat = $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-    return $pat.Current.IsSelected
-}
-
-function Toggle-CheckBox([System.Windows.Automation.AutomationElement]$el) {
-    $pat = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-    $pat.Toggle()
+function Trigger-Control([System.Windows.Automation.AutomationElement]$el, [string]$desc) {
+    if ($null -eq $el) { throw "未找到控件：$desc" }
+    $obj = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$obj)) {
+        $obj.Invoke()
+        return
+    }
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$obj)) {
+        $obj.Select()
+        return
+    }
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$obj)) {
+        $obj.Toggle()
+        return
+    }
+    throw "控件「$desc」未暴露 Invoke/SelectionItem/Toggle 语义动作"
 }
 
 function Get-ToggleState([System.Windows.Automation.AutomationElement]$el) {
@@ -93,24 +104,15 @@ function Get-ToggleState([System.Windows.Automation.AutomationElement]$el) {
     return $pat.Current.ToggleState
 }
 
-function Sample-PngLuminance([string]$pngPath) {
-    $bmp = [System.Drawing.Bitmap]::FromFile($pngPath)
-    try {
-        $w = $bmp.Width
-        $h = $bmp.Height
-        $pxNav = $bmp.GetPixel([int]($w * 0.08), [int]($h * 0.65))
-        $pxTop = $bmp.GetPixel([int]($w * 0.50), [int]($h * 0.05))
-        $lumNav = [math]::Round(0.299 * $pxNav.R + 0.587 * $pxNav.G + 0.114 * $pxNav.B, 1)
-        $lumTop = [math]::Round(0.299 * $pxTop.R + 0.587 * $pxTop.G + 0.114 * $pxTop.B, 1)
-        return [PSCustomObject]@{
-            NavRgb = "$($pxNav.R),$($pxNav.G),$($pxNav.B)"
-            TopRgb = "$($pxTop.R),$($pxTop.G),$($pxTop.B)"
-            NavLum = $lumNav
-            TopLum = $lumTop
-        }
-    } finally {
-        $bmp.Dispose()
+function Get-IsSelected([System.Windows.Automation.AutomationElement]$el) {
+    $obj = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$obj)) {
+        return $obj.Current.IsSelected
     }
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$obj)) {
+        return $obj.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
+    }
+    return $false
 }
 
 function Start-IsolatedApp([string[]]$extraArgs = @()) {
@@ -120,173 +122,323 @@ function Start-IsolatedApp([string[]]$extraArgs = @()) {
     if ($extraArgs.Count -gt 0) {
         $psi.Arguments = ($extraArgs | ForEach-Object { "`"$_`"" }) -join " "
     }
-    $psi.Environment["JPMMVJUI_CONFIG_PATH"] = $testConfigPath
-    $psi.Environment["JPMMVJUI_AUTORUN_NAME"] = $testAutoRunName
-    $psi.Environment["JPMMVJUI_MUTEX_NAME"] = $testMutexName
+    $psi.Environment["UISHOWCASE_CONFIG_PATH"] = $testConfigPath
+    $psi.Environment["UISHOWCASE_AUTORUN_NAME"] = $testAutoRunName
+    $psi.Environment["UISHOWCASE_MUTEX_NAME"] = $testMutexName
     return [System.Diagnostics.Process]::Start($psi)
 }
 
 $proc1 = $null
 $proc2 = $null
-$procSnap = $null
 
 try {
     if (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue) {
         Remove-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue
     }
 
-    # --- 阶段 1：WPF 真实渲染快照与浅/深色像素亮度核验 ---
-    $procSnap = Start-IsolatedApp @("--render-snapshots", $shotDir)
-    if (-not $procSnap.WaitForExit(15000)) {
-        throw "视觉快照生成超时"
+    # 1. 验证 PE 内嵌图标
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exePath)
+    if ($null -eq $icon -or $icon.Width -lt 16) {
+        throw "可执行文件缺少内嵌图标"
     }
-    $lightPix = Sample-PngLuminance (Join-Path $shotDir "01_overview_light_standard.png")
-    $darkPix = Sample-PngLuminance (Join-Path $shotDir "02_overview_dark_standard.png")
-    if ($lightPix.NavLum -lt 220 -or $lightPix.TopLum -lt 220) {
-        throw "浅色渲染核验失败（Nav=$($lightPix.NavRgb), Top=$($lightPix.TopRgb)）"
-    }
-    if ($darkPix.NavLum -gt 45 -or $darkPix.TopLum -gt 55) {
-        throw "深色渲染核验失败（Nav=$($darkPix.NavRgb), Top=$($darkPix.TopRgb)）"
-    }
-    Add-Pass "WPF 真实渲染像素核验通过（浅色亮度 $($lightPix.NavLum)/$($lightPix.TopLum) -> 深色亮度 $($darkPix.NavLum)/$($darkPix.TopLum)）"
+    $icon.Dispose()
+    Add-Pass "PE 内嵌应用图标校验通过"
 
-    # 重置隔离配置文件用于 UIA 交互验收
-    if (Test-Path $testConfigPath) { Remove-Item $testConfigPath -Force }
-
-    # --- 阶段 2：UI Automation 完整交互验收 ---
+    # 2. 启动主窗口并检查 DPI 感知 + 标题
     $proc1 = Start-IsolatedApp
     $win = Find-WindowByPid -pidTarget $proc1.Id
-    if ($null -eq $win) { throw "主窗口未启动" }
+    if ($null -eq $win) { throw "主窗口未启动或未暴露 UI Automation 窗口节点" }
 
     if ($win.Current.Name -ne "澄明界面展示") {
         throw "主窗口标题不符，实际为：$($win.Current.Name)"
     }
-    Add-Pass "主窗口启动且标题统一为「澄明界面展示」"
 
-    # 验证浅色色板色值在 UIA 中为 #F6F7F9，点击切换浅/深色后实时更新为 #181A1F
-    if ($null -eq (Find-ByName $win "#F6F7F9")) { throw "浅色模式下未读取到 BgCanvas 色值 #F6F7F9" }
-    Invoke-Button (Find-ById $win "TopQuickThemeButton")
-    Start-Sleep -Milliseconds 300
-    if ($null -eq (Find-ByName $win "#181A1F")) { throw "切换深色后色板未实时刷新为 #181A1F" }
-    Invoke-Button (Find-ById $win "TopQuickThemeButton")
-    Start-Sleep -Milliseconds 250
-    Add-Pass "右上角一键切换浅/深色并实时刷新全页面语义色板验收通过"
-
-    # 验证标准/紧凑密度真实改变控件渲染高度
-    $stdHeight = [math]::Round((Find-ById $win "NavOverviewButton").Current.BoundingRectangle.Height, 1)
-    Select-Item (Find-ById $win "TopDensityCompactRadio")
-    Start-Sleep -Milliseconds 250
-    $compactHeight = [math]::Round((Find-ById $win "NavOverviewButton").Current.BoundingRectangle.Height, 1)
-    if ($compactHeight -ge ($stdHeight - 5)) {
-        throw "切换紧凑密度后控件实际高度未收缩（标准=$stdHeight，紧凑=$compactHeight）"
+    $dpiAwareness = -1
+    $hr = [NativeDpiCheck]::GetProcessDpiAwareness($proc1.Handle, [ref]$dpiAwareness)
+    if ($hr -ne 0 -or $dpiAwareness -ne 2) {
+        throw "DPI 感知等级不是 PerMonitorV2(2)，实际 hr=$hr, awareness=$dpiAwareness"
     }
-    Select-Item (Find-ById $win "TopDensityStandardRadio")
-    Start-Sleep -Milliseconds 200
-    Add-Pass "标准/紧凑密度真实布局收缩验收通过（导航项高度 $stdHeight -> $compactHeight px）"
+    Add-Pass "主窗口启动成功（标题「澄明界面展示」，PerMonitorV2 DPI 感知 = 2）"
 
-    # 典型工具界面
-    Select-Item (Find-ById $win "NavWorkbenchButton")
-    Start-Sleep -Milliseconds 200
-    Invoke-Button (Find-ById $win "WorkbenchToggleEmptyButton")
-    Start-Sleep -Milliseconds 200
-    Invoke-Button (Find-ById $win "EmptyStateRestoreButton")
-    Start-Sleep -Milliseconds 200
-    Add-Pass "典型工具界面空状态切换与恢复验收通过"
+    # 等待首帧 AccessKit 树就绪
+    $navOverview = Find-ByName $win "导航：总览与色板" 6000
+    if ($null -eq $navOverview) { throw "AccessKit 无障碍树未暴露导航节点「导航：总览与色板」" }
 
-    Invoke-Button (Find-ById $win "WorkbenchDeleteButton")
+    # 3. 验证总览页几何布局不重叠（色板网格 + 字体层级纵向堆叠）+ 浅/深色一键切换
+    $sw1 = Find-ByNameContains $win "画布底色" 3000
+    $sw2 = Find-ByNameContains $win "表面面板" 3000
+    $h1El = Find-ByNameContains $win "H1 页面主标题" 3000
+    $h2El = Find-ByNameContains $win "H2 分区标题" 3000
+    if ($null -eq $sw1 -or $null -eq $sw2 -or $null -eq $h1El -or $null -eq $h2El) {
+        throw "总览页色板或字体层级节点缺失"
+    }
+    if ($sw1.Current.BoundingRectangle.Right -ge $sw2.Current.BoundingRectangle.Left) {
+        throw "语义色板前两项发生横向重叠（$($sw1.Current.BoundingRectangle.Right) >= $($sw2.Current.BoundingRectangle.Left)）"
+    }
+    if ($h1El.Current.BoundingRectangle.Bottom -gt ($h2El.Current.BoundingRectangle.Top + 2)) {
+        throw "字体层级 H1 与 H2 未纵向堆叠（H1.Bottom=$($h1El.Current.BoundingRectangle.Bottom), H2.Top=$($h2El.Current.BoundingRectangle.Top)）"
+    }
+    if ($null -eq (Find-ByNameContains $win "#F6F7F9" 3000)) {
+        throw "浅色模式下未读取到 BgCanvas 色值 #F6F7F9"
+    }
+    Trigger-Control (Find-ByName $win "切换浅/深色") "切换浅/深色"
+    Start-Sleep -Milliseconds 350
+    if ($null -eq (Find-ByNameContains $win "#181A1F" 3000)) {
+        throw "切换深色后色板未实时刷新为 #181A1F"
+    }
+    Trigger-Control (Find-ByName $win "切换浅/深色") "切换浅/深色"
     Start-Sleep -Milliseconds 300
-    Invoke-Button (Find-ById $win "ConfirmDialogCancelButton")
+    Add-Pass "总览页语义色板网格不重叠、字体层级纵向对齐与浅/深色切换通过（#F6F7F9 <-> #181A1F）"
+
+    # 4. 验证标准/紧凑密度真实改变控件渲染高度
+    $stdH = [math]::Round((Find-ByName $win "导航：总览与色板").Current.BoundingRectangle.Height, 1)
+    Trigger-Control (Find-ByName $win "快速切换密度：紧凑") "快速切换密度：紧凑"
+    Start-Sleep -Milliseconds 300
+    $compactH = [math]::Round((Find-ByName $win "导航：总览与色板").Current.BoundingRectangle.Height, 1)
+    if ($compactH -ge ($stdH - 4)) {
+        throw "切换紧凑密度后导航项实际高度未收缩（标准=$stdH，紧凑=$compactH）"
+    }
+    Trigger-Control (Find-ByName $win "快速切换密度：标准") "快速切换密度：标准"
+    Start-Sleep -Milliseconds 250
+    Add-Pass "标准/紧凑密度布局收缩通过（导航项高度 $stdH -> $compactH px）"
+
+    # 5. 验证顶栏实时字体切换（楷体 <-> 雅黑）
+    Trigger-Control (Find-ByName $win "快速切换字体：雅黑") "快速切换字体：雅黑"
+    Start-Sleep -Milliseconds 300
+    if ($null -eq (Find-ByNameContains $win "微软雅黑 UI" 3000)) {
+        throw "切换微软雅黑 UI 后状态栏未同步更新"
+    }
+    Trigger-Control (Find-ByName $win "快速切换字体：楷体") "快速切换字体：楷体"
+    Start-Sleep -Milliseconds 300
+    Add-Pass "顶栏字体实时切换（方正公文楷体 <-> 微软雅黑 UI）通过"
+
+    # 6. 典型工具界面：列表四列不越界重叠 + 行切换 + 空状态 + 危险操作中文二次确认弹窗
+    Trigger-Control (Find-ByName $win "导航：典型工具界面") "导航：典型工具界面"
+    Start-Sleep -Milliseconds 300
+    $row1 = Find-ByNameContains $win "DOC-001" 3000
+    $row2 = Find-ByNameContains $win "DOC-002" 3000
+    $delBtn = Find-ByName $win "移除选中记录（演示二次确认）" 3000
+    if ($null -eq $row1 -or $null -eq $row2 -or $null -eq $delBtn) {
+        throw "典型工具界面未找到列表行或右侧详情操作按钮"
+    }
+    $r1 = $row1.Current.BoundingRectangle
+    $rDel = $delBtn.Current.BoundingRectangle
+    if ($r1.Right -ge $rDel.Left) {
+        throw "核查记录列表行右边界 ($($r1.Right)) 越界侵入右侧详情区 ($($rDel.Left))"
+    }
+    Trigger-Control $row2 "选择 DOC-002"
+    Start-Sleep -Milliseconds 250
+    if ($null -eq (Find-ByNameContains $win "4C19-DE07" 3000)) {
+        throw "点击列表第 2 行后右侧详情未同步切换至 DOC-002"
+    }
+    Trigger-Control (Find-ByName $win "预览空状态") "预览空状态"
+    Start-Sleep -Milliseconds 250
+    Trigger-Control (Find-ByName $win "恢复示例列表") "恢复示例列表"
+    Start-Sleep -Milliseconds 250
+    Trigger-Control (Find-ByName $win "移除选中记录（演示二次确认）") "移除选中记录（演示二次确认）"
+    Start-Sleep -Milliseconds 300
+    Trigger-Control (Find-ByName $win "取消") "二次确认弹窗取消按钮"
+    Start-Sleep -Milliseconds 250
+    Add-Pass "典型工具界面四列列表不重叠、行切换详情、空状态与二次确认弹窗验收通过"
+
+    # 7. 控件与交互态：几何布局不重叠 + 五态反馈 + 内联错误 + 开关 TogglePattern
+    Trigger-Control (Find-ByName $win "导航：控件与交互态") "导航：控件与交互态"
+    Start-Sleep -Milliseconds 300
+    $editDir = Find-ByName $win "目标工作目录" 3000
+    $btnSimErr = Find-ByName $win "模拟非法输入" 3000
+    $toggleA = Find-ByName $win "保存配置时自动校验完整性" 3000
+    $toggleB = Find-ByName $win "列表中仅展示存在异常的记录" 3000
+    $bnInfo = Find-ByNameContains $win "[信息] OpenGL" 3000
+    $bnOk = Find-ByNameContains $win "[成功] 本地设置" 3000
+    $bnWarn = Find-ByNameContains $win "[警告] 检测到" 3000
+    if ($null -eq $editDir -or $null -eq $btnSimErr -or $null -eq $toggleA -or $null -eq $toggleB -or $null -eq $bnInfo -or $null -eq $bnOk -or $null -eq $bnWarn) {
+        throw "控件页关键节点缺失"
+    }
+    if ($editDir.Current.BoundingRectangle.Bottom -gt ($btnSimErr.Current.BoundingRectangle.Top + 4)) {
+        throw "控件页输入框与下方操作按钮未纵向排列"
+    }
+    if ($btnSimErr.Current.BoundingRectangle.Right -ge $toggleA.Current.BoundingRectangle.Left) {
+        throw "控件页左列与右列发生横向重叠"
+    }
+    if ($toggleA.Current.BoundingRectangle.Bottom -gt ($toggleB.Current.BoundingRectangle.Top + 4)) {
+        throw "控件页两个开关未纵向堆叠"
+    }
+    if ($bnInfo.Current.BoundingRectangle.Right -ge $bnOk.Current.BoundingRectangle.Left) {
+        throw "状态反馈「信息」与「成功」横幅发生横向重叠"
+    }
+    if ($bnInfo.Current.BoundingRectangle.Bottom -gt ($bnWarn.Current.BoundingRectangle.Top + 4)) {
+        throw "状态反馈第一行与第二行未纵向分开"
+    }
+    Trigger-Control (Find-ByName $win "主操作按钮") "主操作按钮"
     Start-Sleep -Milliseconds 200
-    Add-Pass "危险操作中文二次确认弹窗唤起与取消验收通过"
-
-    # 控件与交互态
-    Select-Item (Find-ById $win "NavControlsButton")
+    if ($null -eq (Find-ByNameContains $win "已触发「主操作按钮」" 3000)) {
+        throw "主按钮点击反馈未更新"
+    }
+    Trigger-Control $btnSimErr "模拟非法输入"
+    Start-Sleep -Milliseconds 250
+    if ($null -eq (Find-ByNameContains $win "[错误] 路径包含非法字符" 3000)) {
+        throw "非法输入后未呈现中文内联错误提示"
+    }
+    Trigger-Control (Find-ByName $win "恢复合法路径") "恢复合法路径"
     Start-Sleep -Milliseconds 200
-    Invoke-Button (Find-ById $win "DemoPrimaryButton")
-    Start-Sleep -Milliseconds 150
-    if ((Find-ById $win "DemoFeedbackText").Current.Name -notlike "*主操作按钮*") { throw "主按钮点击反馈异常" }
 
-    Invoke-Button (Find-ById $win "DemoSimulateErrorButton")
-    Start-Sleep -Milliseconds 150
-    if ((Find-ById $win "DemoInlineErrorText").Current.Name -notlike "*非法字符*") { throw "内联错误提示内容异常" }
-    Invoke-Button (Find-ById $win "DemoRestoreValidButton")
-    Start-Sleep -Milliseconds 150
-
-    $toggleA = Find-ById $win "DemoToggleSwitchA"
-    $beforeToggle = Get-ToggleState $toggleA
-    Toggle-CheckBox $toggleA
-    Start-Sleep -Milliseconds 100
-    if ($beforeToggle -eq (Get-ToggleState $toggleA)) { throw "开关 TogglePattern 状态未变化" }
-    Add-Pass "控件五态反馈、内联报错与 TogglePattern 语义动作验收通过"
-
-    # 主题与设置
-    Select-Item (Find-ById $win "NavSettingsButton")
+    $beforeState = Get-ToggleState $toggleA
+    Trigger-Control $toggleA "保存配置时自动校验完整性"
     Start-Sleep -Milliseconds 200
-    Select-Item (Find-ById $win "SettingsThemeDarkRadio")
-    Select-Item (Find-ById $win "SettingsAccentTealRadio")
-    Select-Item (Find-ById $win "SettingsDensityCompactRadio")
+    $afterState = Get-ToggleState (Find-ByName $win "保存配置时自动校验完整性")
+    if ($beforeState -eq $afterState) {
+        throw "开关 TogglePattern 状态未变化"
+    }
+    Add-Pass "控件页双列与状态反馈 2×2 网格几何对齐、五态反馈、内联报错与开关 TogglePattern 验收通过"
+
+    # 8. 主题与设置：深色 + 青瓷绿 + 紧凑密度 + 登录自启注册表写入/清除
+    Trigger-Control (Find-ByName $win "导航：主题与设置") "导航：主题与设置"
+    Start-Sleep -Milliseconds 250
+    Trigger-Control (Find-ByName $win "主题模式：深色模式") "主题模式：深色模式"
+    Start-Sleep -Milliseconds 200
+    Trigger-Control (Find-ByName $win "强调色：青瓷绿") "强调色：青瓷绿"
+    Start-Sleep -Milliseconds 200
+    Trigger-Control (Find-ByName $win "界面密度：紧凑密度") "界面密度：紧凑密度"
     Start-Sleep -Milliseconds 250
 
-    $autoToggle = Find-ById $win "SettingsAutoStartToggle"
-    Toggle-CheckBox $autoToggle
-    Start-Sleep -Milliseconds 200
+    $autoToggle = Find-ByName $win "登录时启动（同步写入当前用户启动项注册表）"
+    Trigger-Control $autoToggle "登录时启动"
+    Start-Sleep -Milliseconds 300
     $regVal = (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue).$testAutoRunName
     if ([string]::IsNullOrWhiteSpace($regVal) -or $regVal -notlike "*--minimized*") {
         throw "登录启动项写入验证失败，实际值：$regVal"
     }
-    Toggle-CheckBox $autoToggle
-    Start-Sleep -Milliseconds 200
+    Trigger-Control (Find-ByName $win "登录时启动（同步写入当前用户启动项注册表）") "停用登录时启动"
+    Start-Sleep -Milliseconds 300
     if ($null -ne (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue).$testAutoRunName) {
         throw "停用登录启动项后未清除注册表项"
     }
-    Add-Pass "设置页主题/强调色/密度切换与登录启动项注册/移除验收通过"
+    Add-Pass "设置页主题/强调色/密度切换与 HKCU Run 启动项写入/清除验收通过"
 
-    Invoke-Button (Find-ById $win "NavExitButton")
+    # 9. 关于与环境页检查
+    Trigger-Control (Find-ByName $win "导航：关于与环境") "导航：关于与环境"
+    Start-Sleep -Milliseconds 250
+    if ($null -eq (Find-ByNameContains $win "OpenGL (glow)" 3000)) {
+        throw "关于页未显示 OpenGL (glow) 渲染后端信息"
+    }
+    Add-Pass "关于与环境页 DPI/glow 后端读数验收通过"
+
+    # 10. 正常退出应用
+    Trigger-Control (Find-ByName $win "退出应用") "退出应用"
     if (-not $proc1.WaitForExit(5000)) { throw "点击退出应用后进程未在 5 秒内退出" }
-    Add-Pass "通过导航栏「退出应用」正常退出并清理托盘"
+    Add-Pass "通过导航栏「退出应用」干净退出"
 
-    # --- 阶段 3：重启持久化与关闭隐藏到托盘 ---
+    # 11. 重启持久化 + 单实例排他验证
+    $savedJson = Get-Content $testConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($savedJson.theme_mode -ne "Dark" -or $savedJson.accent_preset -ne "Teal" -or $savedJson.density_mode -ne "Compact") {
+        throw "settings.json 持久化内容不符：$($savedJson | ConvertTo-Json -Compress)"
+    }
+
     $proc2 = Start-IsolatedApp
     $win2 = Find-WindowByPid -pidTarget $proc2.Id
     if ($null -eq $win2) { throw "第二次启动主窗口失败" }
-    if ($null -eq (Find-ByName $win2 "#181A1F")) { throw "重启后深色主题未实际加载生效" }
-
-    Select-Item (Find-ById $win2 "NavSettingsButton")
-    Start-Sleep -Milliseconds 200
-    if (-not (Get-IsSelected (Find-ById $win2 "SettingsThemeDarkRadio"))) { throw "深色模式未持久化" }
-    if (-not (Get-IsSelected (Find-ById $win2 "SettingsAccentTealRadio"))) { throw "青瓷绿强调色未持久化" }
-    if (-not (Get-IsSelected (Find-ById $win2 "SettingsDensityCompactRadio"))) { throw "紧凑密度未持久化" }
+    if ($null -eq (Find-ByNameContains $win2 "#181A1F" 4000)) {
+        throw "重启后深色主题未实际加载生效"
+    }
+    Trigger-Control (Find-ByName $win2 "导航：主题与设置") "导航：主题与设置"
+    Start-Sleep -Milliseconds 250
+    if (-not (Get-IsSelected (Find-ByName $win2 "主题模式：深色模式"))) { throw "深色模式未持久化" }
+    if (-not (Get-IsSelected (Find-ByName $win2 "强调色：青瓷绿"))) { throw "青瓷绿强调色未持久化" }
+    if (-not (Get-IsSelected (Find-ByName $win2 "界面密度：紧凑密度"))) { throw "紧凑密度未持久化" }
     Add-Pass "重启后深色模式、青瓷绿强调色与紧凑密度真实持久化验收通过"
 
-    $winPat = $win2.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
-    $winPat.Close()
-    Start-Sleep -Milliseconds 400
-    if ($null -ne (Find-WindowByPid -pidTarget $proc2.Id -timeoutMs 600)) { throw "关闭窗口后未隐藏到托盘" }
-    if ($proc2.HasExited) { throw "隐藏到托盘模式下进程意外退出" }
-    Add-Pass "关闭主窗口隐藏到托盘行为验收通过"
-
-    # 验证单实例排他：重复启动第二个进程应立刻退出，并自动唤回隐藏在托盘的第一个实例窗口
+    # 单实例排他验证
     $procDup = Start-IsolatedApp
     if (-not $procDup.WaitForExit(4000)) {
         $procDup.Kill()
         throw "重复启动的第二个实例未自动退出，单实例排他失效"
     }
-    $restoredWin = Find-WindowByPid -pidTarget $proc2.Id -timeoutMs 4000
-    if ($null -eq $restoredWin) {
-        throw "重复启动后未能自动唤回已隐藏在托盘中的主窗口"
+    if ($proc2.HasExited) {
+        throw "重复启动后原实例意外退出"
     }
-    Add-Pass "单实例排他验收通过（重复进程自动退出，且成功唤回托盘中的主窗口）"
+    Add-Pass "单实例 Mutex 排他验收通过（重复进程静默退出，已有实例保持运行）"
 
-    Invoke-Button (Find-ById $restoredWin "NavExitButton")
+    # 托盘状态检查（若存在 Shell_TrayWnd 则验证关闭隐藏到托盘）
+    $shellTray = [NativeDpiCheck]::FindWindow("Shell_TrayWnd", $null)
+    if ($shellTray -ne [IntPtr]::Zero) {
+        $winPat = $win2.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        $winPat.Close()
+        Start-Sleep -Milliseconds 500
+        if ($proc2.HasExited) { throw "有系统托盘环境下关闭窗口未隐藏到托盘" }
+        $procWake = Start-IsolatedApp
+        $procWake.WaitForExit(4000) | Out-Null
+        $win2 = Find-WindowByPid -pidTarget $proc2.Id -timeoutMs 4000
+        if ($null -eq $win2) { throw "重复启动未能唤回隐藏在托盘中的主窗口" }
+        Add-Pass "关闭隐藏到托盘与重复启动唤回主窗口验收通过"
+    } else {
+        Write-Host "[INFO] 当前会话为无 Shell_TrayWnd 的独立测试桌面，跳过系统托盘图标隐藏/唤回实测。" -ForegroundColor Yellow
+    }
+
+    Trigger-Control (Find-ByName $win2 "退出应用") "退出应用"
     if (-not $proc2.WaitForExit(5000)) {
         $proc2.Kill()
-        throw "唤回主窗口后退出失败"
+        throw "第二次实例退出失败"
     }
 
-    Write-Host "`n全部 UI Automation 与真实渲染像素验收项通过（共 $($results.Count) 项）。" -ForegroundColor Cyan
+    # 12. 隐藏窗口（--minimized）下的托盘唤醒与托盘退出事件闭环测试
+    $ctrlCls = "${testMutexName}_Control"
+    $WM_APP_EXIT = [uint32](0x8000 + 4)
+
+    $procHidden = Start-IsolatedApp @("--minimized")
+    try {
+        $ctrlHwnd = [IntPtr]::Zero
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        while ($sw.ElapsedMilliseconds -lt 5000) {
+            $ctrlHwnd = [NativeDpiCheck]::FindWindow($ctrlCls, $ctrlCls)
+            if ($ctrlHwnd -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        if ($ctrlHwnd -eq [IntPtr]::Zero) { throw "隐藏启动实例未创建托盘控制窗口 $ctrlCls" }
+        Start-Sleep -Milliseconds 400
+        # 直接通过托盘退出通道退出隐藏窗口
+        [void][NativeDpiCheck]::PostMessage($ctrlHwnd, $WM_APP_EXIT, [IntPtr]::Zero, [IntPtr]::Zero)
+        if (-not $procHidden.WaitForExit(5000)) {
+            $procHidden.Kill()
+            throw "隐藏窗口模式下收到托盘退出指令后未在 5 秒内退出"
+        }
+        Add-Pass "隐藏窗口（托盘驻留）状态下托盘「退出」通道立即退出验收通过"
+    } finally {
+        if ($procHidden -and -not $procHidden.HasExited) { $procHidden.Kill() }
+    }
+
+    # 13. 隐藏窗口状态下重复启动唤回主窗口，再通过托盘退出通道关闭可见窗口
+    $procWakeHost = Start-IsolatedApp @("--minimized")
+    try {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $ctrlHwnd2 = [IntPtr]::Zero
+        while ($sw.ElapsedMilliseconds -lt 5000) {
+            $ctrlHwnd2 = [NativeDpiCheck]::FindWindow($ctrlCls, $ctrlCls)
+            if ($ctrlHwnd2 -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        Start-Sleep -Milliseconds 350
+        $procSecond = Start-IsolatedApp
+        if (-not $procSecond.WaitForExit(4000)) {
+            $procSecond.Kill()
+            throw "隐藏窗口唤醒测试中重复实例未退出"
+        }
+        $wokenWin = Find-WindowByPid -pidTarget $procWakeHost.Id -timeoutMs 5000
+        if ($null -eq $wokenWin) {
+            throw "隐藏窗口收到单实例唤醒消息后未能重新显示主窗口"
+        }
+        [void][NativeDpiCheck]::PostMessage($ctrlHwnd2, $WM_APP_EXIT, [IntPtr]::Zero, [IntPtr]::Zero)
+        if (-not $procWakeHost.WaitForExit(5000)) {
+            $procWakeHost.Kill()
+            throw "可见窗口收到托盘退出指令后未在 5 秒内退出"
+        }
+        Add-Pass "隐藏窗口单实例唤醒显示 + 可见状态托盘「退出」验收通过"
+    } finally {
+        if ($procWakeHost -and -not $procWakeHost.HasExited) { $procWakeHost.Kill() }
+    }
+
+    Write-Host "`n全部 Rust + egui + AccessKit 自动化验收项通过（共 $($results.Count) 项）。" -ForegroundColor Cyan
 }
 finally {
-    if ($procSnap -and -not $procSnap.HasExited) { $procSnap.Kill() }
     if ($proc1 -and -not $proc1.HasExited) { $proc1.Kill() }
     if ($proc2 -and -not $proc2.HasExited) { $proc2.Kill() }
     if (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue) {
