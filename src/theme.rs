@@ -387,8 +387,10 @@ pub fn apply_theme(ctx: &egui::Context, p: Palette, m: DensityMetrics) {
     v.widgets.open.fg_stroke = Stroke::new(1.0, p.text_primary);
     v.widgets.open.corner_radius = CornerRadius::same(4);
 
-    v.selection.bg_fill = p.accent_primary;
-    v.selection.stroke = Stroke::new(2.0, p.focus_ring);
+    // egui 中 selection.stroke.color 为选中文字前景色；采用浅色强调底 + 主文本色，
+    // 确保深浅模式下均具备高对比度，并完全规避 egui 0.33.3 折行末字漏改色导致的视觉割裂
+    v.selection.bg_fill = p.bg_selected;
+    v.selection.stroke = Stroke::new(1.5, p.text_primary);
 
     style.visuals = v;
     ctx.set_style(style);

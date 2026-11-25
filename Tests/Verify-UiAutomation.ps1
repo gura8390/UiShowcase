@@ -164,7 +164,24 @@ try {
     $navOverview = Find-ByName $win "导航：总览与色板" 6000
     if ($null -eq $navOverview) { throw "AccessKit 无障碍树未暴露导航节点「导航：总览与色板」" }
 
-    # 3. 验证总览页几何布局不重叠（色板网格 + 字体层级纵向堆叠）+ 浅/深色一键切换
+    # 3. 验证总览页四张原则卡等宽等高 + 色板网格不重叠 + 字体层级纵向堆叠 + 浅/深色切换
+    $pCards = @(
+        (Find-ByNameContains $win "01 · GPU 锐利字体" 3000),
+        (Find-ByNameContains $win "02 · 色阶与细线分层" 3000),
+        (Find-ByNameContains $win "03 · 语义双主题" 3000),
+        (Find-ByNameContains $win "04 · 居中与无障碍" 3000)
+    )
+    if ($pCards | Where-Object { $null -eq $_ }) {
+        throw "总览页四张核心原则卡片节点缺失"
+    }
+    $refW = $pCards[0].Current.BoundingRectangle.Width
+    $refH = $pCards[0].Current.BoundingRectangle.Height
+    foreach ($pc in $pCards) {
+        $br = $pc.Current.BoundingRectangle
+        if ([math]::Abs($br.Width - $refW) -gt 2 -or [math]::Abs($br.Height - $refH) -gt 2) {
+            throw "四张核心原则卡片尺寸不一致（参考=${refW}x${refH}，实际=$($br.Width)x$($br.Height)）"
+        }
+    }
     $sw1 = Find-ByNameContains $win "画布底色" 3000
     $sw2 = Find-ByNameContains $win "表面面板" 3000
     $h1El = Find-ByNameContains $win "H1 页面主标题" 3000
@@ -178,17 +195,29 @@ try {
     if ($h1El.Current.BoundingRectangle.Bottom -gt ($h2El.Current.BoundingRectangle.Top + 2)) {
         throw "字体层级 H1 与 H2 未纵向堆叠（H1.Bottom=$($h1El.Current.BoundingRectangle.Bottom), H2.Top=$($h2El.Current.BoundingRectangle.Top)）"
     }
+    # 验证顶栏三组快捷切换控件尺寸与风格完全一致，且与副标题保持充足间距
+    $hdrFont = Find-ByName $win "快速切换字体：楷体" 3000
+    $hdrDens = Find-ByName $win "快速切换密度：标准" 3000
+    $hdrThemeLight = Find-ByName $win "快速切换主题：浅色" 3000
+    $hdrThemeDark = Find-ByName $win "快速切换主题：深色" 3000
+    if ($null -eq $hdrFont -or $null -eq $hdrDens -or $null -eq $hdrThemeLight -or $null -eq $hdrThemeDark) {
+        throw "顶栏三组统一分段切换控件缺失"
+    }
+    if ([math]::Abs($hdrFont.Current.BoundingRectangle.Height - $hdrThemeLight.Current.BoundingRectangle.Height) -gt 2 -or
+        [math]::Abs($hdrDens.Current.BoundingRectangle.Height - $hdrThemeLight.Current.BoundingRectangle.Height) -gt 2) {
+        throw "顶栏三组快捷切换控件高度不一致"
+    }
     if ($null -eq (Find-ByNameContains $win "#F6F7F9" 3000)) {
         throw "浅色模式下未读取到 BgCanvas 色值 #F6F7F9"
     }
-    Trigger-Control (Find-ByName $win "切换浅/深色") "切换浅/深色"
+    Trigger-Control $hdrThemeDark "快速切换主题：深色"
     Start-Sleep -Milliseconds 350
     if ($null -eq (Find-ByNameContains $win "#181A1F" 3000)) {
         throw "切换深色后色板未实时刷新为 #181A1F"
     }
-    Trigger-Control (Find-ByName $win "切换浅/深色") "切换浅/深色"
+    Trigger-Control (Find-ByName $win "快速切换主题：浅色" 3000) "快速切换主题：浅色"
     Start-Sleep -Milliseconds 300
-    Add-Pass "总览页语义色板网格不重叠、字体层级纵向对齐与浅/深色切换通过（#F6F7F9 <-> #181A1F）"
+    Add-Pass "总览页原则卡等高、顶栏三组切换统一、语义色板与浅/深色切换通过（#F6F7F9 <-> #181A1F）"
 
     # 4. 验证标准/紧凑密度真实改变控件渲染高度
     $stdH = [math]::Round((Find-ByName $win "导航：总览与色板").Current.BoundingRectangle.Height, 1)
@@ -212,9 +241,12 @@ try {
     Start-Sleep -Milliseconds 300
     Add-Pass "顶栏字体实时切换（方正公文楷体 <-> 微软雅黑 UI）通过"
 
-    # 6. 典型工具界面：列表四列不越界重叠 + 行切换 + 空状态 + 危险操作中文二次确认弹窗
+    # 6. 典型工具界面：空闲不显示待机进度 + 列表四列不越界重叠 + 自定义下拉 + 空状态 + 二次确认
     Trigger-Control (Find-ByName $win "导航：典型工具界面") "导航：典型工具界面"
     Start-Sleep -Milliseconds 300
+    if ($null -ne (Find-ByName $win "空闲" 300)) {
+        throw "典型工具界面空闲状态不应显示「空闲」待机占位文案"
+    }
     $row1 = Find-ByNameContains $win "DOC-001" 3000
     $row2 = Find-ByNameContains $win "DOC-002" 3000
     $delBtn = Find-ByName $win "移除选中记录（演示二次确认）" 3000
@@ -231,6 +263,26 @@ try {
     if ($null -eq (Find-ByNameContains $win "4C19-DE07" 3000)) {
         throw "点击列表第 2 行后右侧详情未同步切换至 DOC-002"
     }
+    # 验证自定义状态筛选下拉框可展开、切换选项并与重置按钮等高对齐
+    $resetBtn = Find-ByName $win "重置数据" 3000
+    $filterCombo = Find-ByNameContains $win "按状态筛选：全部状态" 3000
+    if ($null -eq $resetBtn -or $null -eq $filterCombo) {
+        throw "典型工具界面未找到重置数据按钮或自定义状态筛选下拉框"
+    }
+    if ([math]::Abs($resetBtn.Current.BoundingRectangle.Height - $filterCombo.Current.BoundingRectangle.Height) -gt 2) {
+        throw "状态筛选下拉框高度与工具栏按钮不一致（按钮=$($resetBtn.Current.BoundingRectangle.Height)，下拉=$($filterCombo.Current.BoundingRectangle.Height)）"
+    }
+    Trigger-Control $filterCombo "展开状态筛选下拉框"
+    Start-Sleep -Milliseconds 250
+    $optDanger = Find-ByName $win "存在异常" 3000
+    if ($null -eq $optDanger) { throw "展开状态筛选下拉框后未显示选项「存在异常」" }
+    Trigger-Control $optDanger "选择存在异常"
+    Start-Sleep -Milliseconds 250
+    if ($null -eq (Find-ByNameContains $win "按状态筛选：存在异常" 3000)) {
+        throw "选择「存在异常」后下拉框未更新选中文案"
+    }
+    Trigger-Control $resetBtn "重置数据"
+    Start-Sleep -Milliseconds 250
     Trigger-Control (Find-ByName $win "预览空状态") "预览空状态"
     Start-Sleep -Milliseconds 250
     Trigger-Control (Find-ByName $win "恢复示例列表") "恢复示例列表"
@@ -251,8 +303,18 @@ try {
     $bnInfo = Find-ByNameContains $win "[信息] OpenGL" 3000
     $bnOk = Find-ByNameContains $win "[成功] 本地设置" 3000
     $bnWarn = Find-ByNameContains $win "[警告] 检测到" 3000
-    if ($null -eq $editDir -or $null -eq $btnSimErr -or $null -eq $toggleA -or $null -eq $toggleB -or $null -eq $bnInfo -or $null -eq $bnOk -or $null -eq $bnWarn) {
+    $bnErr = Find-ByNameContains $win "[错误] 目标目录" 3000
+    $sliderEl = Find-ByName $win "并发扫描阈值" 3000
+    if ($null -eq $editDir -or $null -eq $btnSimErr -or $null -eq $toggleA -or $null -eq $toggleB -or $null -eq $bnInfo -or $null -eq $bnOk -or $null -eq $bnWarn -or $null -eq $bnErr -or $null -eq $sliderEl) {
         throw "控件页关键节点缺失"
+    }
+    $bnRefW = $bnInfo.Current.BoundingRectangle.Width
+    $bnRefH = $bnInfo.Current.BoundingRectangle.Height
+    foreach ($bn in @($bnOk, $bnWarn, $bnErr)) {
+        $br = $bn.Current.BoundingRectangle
+        if ([math]::Abs($br.Width - $bnRefW) -gt 2 -or [math]::Abs($br.Height - $bnRefH) -gt 2) {
+            throw "状态反馈四件套框尺寸不一致（参考=${bnRefW}x${bnRefH}，实际=$($br.Width)x$($br.Height)）"
+        }
     }
     if ($editDir.Current.BoundingRectangle.Bottom -gt ($btnSimErr.Current.BoundingRectangle.Top + 4)) {
         throw "控件页输入框与下方操作按钮未纵向排列"

@@ -8,7 +8,8 @@ use crate::system::{
 };
 use crate::theme::{DensityMetrics, Palette, apply_theme, hex_color, resolve_palette, setup_fonts};
 use crate::widgets::{
-    ButtonKind, StatusKind, nav_item, segment_bar, status_badge, status_banner, styled_button,
+    ButtonKind, StatusKind, equal_height_card_pair, nav_item, principle_card_row, segment_bar,
+    status_badge, status_banner, status_banner_grid, styled_button, styled_dropdown, styled_slider,
     surface_card, toggle_switch, workbench_task_header, workbench_task_row,
 };
 use eframe::egui::{self, Color32, CornerRadius, RichText, Stroke, ViewportCommand};
@@ -223,7 +224,7 @@ impl ShowcaseApp {
             scanning: false,
             scan_progress: 0.0,
             scan_last_tick: None,
-            scan_status_text: "空闲".to_owned(),
+            scan_status_text: String::new(),
             confirm_delete_id: None,
             demo_path: r"D:\Codex\UiShowcase".to_owned(),
             demo_toggle_a: true,
@@ -460,37 +461,45 @@ impl ShowcaseApp {
                     Stroke::new(1.0, p.border_subtle),
                 );
 
+                let avail_w = ui.available_width();
+                // 为右侧三组等高分段开关预留固定空间 + 至少 28pt 呼吸留白，防止副标题与按钮贴近
+                let left_max_w = (avail_w - 388.0).max(180.0);
+
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        ui.label(
-                            RichText::new(self.page.title())
-                                .size(m.h1_size)
-                                .color(p.text_primary),
-                        );
-                        ui.label(
-                            RichText::new(self.page.subtitle())
-                                .size(m.secondary_size)
-                                .color(p.text_secondary),
-                        );
-                    });
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_max_w, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_width(left_max_w);
+                            ui.set_max_width(left_max_w);
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            ui.label(
+                                RichText::new(self.page.title())
+                                    .size(m.h1_size)
+                                    .color(p.text_primary),
+                            );
+                            ui.label(
+                                RichText::new(self.page.subtitle())
+                                    .size(m.secondary_size)
+                                    .color(p.text_secondary),
+                            );
+                        },
+                    );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if styled_button(
+                        let mut is_dark = p.dark;
+                        if segment_bar(
                             ui,
                             p,
                             m,
-                            "切换浅/深色",
-                            ButtonKind::Secondary,
-                            true,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            self.settings.theme_mode = if p.dark {
-                                ThemeMode::Light
-                            } else {
+                            &mut is_dark,
+                            &[(false, "浅色"), (true, "深色")],
+                            "快速切换主题",
+                        ) {
+                            self.settings.theme_mode = if is_dark {
                                 ThemeMode::Dark
+                            } else {
+                                ThemeMode::Light
                             };
                             self.apply_visuals_and_save(ctx, "主题模式已更新", false);
                         }
@@ -575,55 +584,30 @@ impl ShowcaseApp {
     }
 
     fn render_overview(&self, ui: &mut egui::Ui, p: Palette, m: DensityMetrics) {
-        // 4 个核心原则卡片（严格 top_down 布局与列宽约束，绝不横向错乱）
-        let avail_w = ui.available_width();
-        let gap = 12.0;
-        let card_w = ((avail_w - gap * 3.0) / 4.0).floor().max(160.0);
-        let card_inner_w = (card_w - f32::from(m.card_pad) * 2.0).max(120.0);
-        let card_min_h = 124.0 - f32::from(m.card_pad) * 2.0;
-
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            for (title, desc) in [
+        // 4 个核心原则卡片（统一测高锁定精确等宽等高 + 内容视觉水平与垂直双居中）
+        principle_card_row(
+            ui,
+            p,
+            m,
+            &[
                 (
                     "01 · GPU 锐利字体",
-                    "基于 Rust + egui (OpenGL/glow) 按真实物理分辨率光栅化字形图集，高分屏无虚边。",
+                    "基于 Rust + egui 按真实物理分辨率光栅化字形图集，高分屏清晰无虚边。",
                 ),
                 (
                     "02 · 色阶与细线分层",
-                    "常规内容区靠背景色差与 1px 细边框自然分区，全局无重阴影与浮夸渐变。",
+                    "常规内容区依靠背景色差与 1px 细边框自然分区，全局克制无重阴影。",
                 ),
                 (
                     "03 · 语义双主题",
-                    "全界面由语义 Token 驱动，一键切换浅色、深色、四组强调色与双密度档位。",
+                    "全界面由语义色板驱动，支持一键切换浅色、深色、强调色与双密度。",
                 ),
                 (
                     "04 · 居中与无障碍",
-                    "所有按钮与控件内置精确几何居中与 2px 焦点环，经 AccessKit 暴露完整 UIA 树。",
+                    "全部控件内置精确几何居中与 2px 焦点环，经 AccessKit 暴露无障碍树。",
                 ),
-            ] {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(card_w, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_width(card_w);
-                        ui.set_max_width(card_w);
-                        surface_card(ui, p, m, |ui| {
-                            ui.set_width(card_inner_w);
-                            ui.set_max_width(card_inner_w);
-                            ui.set_min_height(card_min_h);
-                            ui.label(RichText::new(title).size(m.h3_size).color(p.text_primary));
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(desc)
-                                    .size(m.secondary_size)
-                                    .color(p.text_secondary),
-                            );
-                        });
-                    },
-                );
-            }
-        });
+            ],
+        );
 
         ui.add_space(m.section_gap);
 
@@ -755,121 +739,105 @@ impl ShowcaseApp {
 
         ui.add_space(m.section_gap);
 
-        // 排版层级 + 数据对齐对照（严格双列 top_down + 等宽约束）
+        // 排版层级 + 数据对齐对照（严格双列等高齐平，上下边框完全对齐）
         let pair_gap = 14.0;
         let half_w = ((ui.available_width() - pair_gap) / 2.0).floor().max(260.0);
-        let half_inner_w = (half_w - f32::from(m.card_pad) * 2.0).max(200.0);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = pair_gap;
-            ui.allocate_ui_with_layout(
-                egui::vec2(half_w, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(half_w);
-                    ui.set_max_width(half_w);
-                    surface_card(ui, p, m, |ui| {
-                        ui.set_width(half_inner_w);
-                        ui.set_max_width(half_inner_w);
-                        ui.set_min_height(220.0);
-                        let font_name = match self.settings.font_choice {
-                            FontChoice::FzGwKai => "方正公文楷体（内嵌 TTF · GPU 图集）",
-                            FontChoice::MicrosoftYaHei => "微软雅黑 UI（系统字体 · GPU 图集）",
-                        };
-                        ui.label(
-                            RichText::new(format!("字体层级 · {font_name}"))
-                                .size(m.h2_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(format!("H1 页面主标题 · {:.0}pt", m.h1_size))
-                                .size(m.h1_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(format!("H2 分区标题 · {:.0}pt", m.h2_size))
-                                .size(m.h2_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(format!("H3 卡片标题 · {:.0}pt", m.h3_size))
-                                .size(m.h3_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(6.0);
-                        ui.label(
-                            RichText::new("Body 正文文字：由 egui 按当前屏幕缩放倍率直接生成高分字形图集，右上角可随时一键对比「楷体 / 雅黑」。")
-                                .size(m.body_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new("Caption 辅助注释与状态栏文字")
-                                .size(m.caption_size)
-                                .color(p.text_muted),
-                        );
+        let font_choice = self.settings.font_choice;
+        equal_height_card_pair(
+            ui,
+            p,
+            m,
+            "overview_type_and_data",
+            half_w,
+            half_w,
+            pair_gap,
+            |ui| {
+                let font_name = match font_choice {
+                    FontChoice::FzGwKai => "方正公文楷体（内嵌 TTF · GPU 图集）",
+                    FontChoice::MicrosoftYaHei => "微软雅黑 UI（系统字体 · GPU 图集）",
+                };
+                ui.label(
+                    RichText::new(format!("字体层级 · {font_name}"))
+                        .size(m.h2_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(format!("H1 页面主标题 · {:.0}pt", m.h1_size))
+                        .size(m.h1_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!("H2 分区标题 · {:.0}pt", m.h2_size))
+                        .size(m.h2_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!("H3 卡片标题 · {:.0}pt", m.h3_size))
+                        .size(m.h3_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Body 正文文字：由 egui 按当前屏幕缩放倍率直接生成高分字形图集，右上角可随时一键对比「楷体 / 雅黑」。")
+                        .size(m.body_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Caption 辅助注释与状态栏文字")
+                        .size(m.caption_size)
+                        .color(p.text_muted),
+                );
+            },
+            |ui| {
+                ui.label(
+                    RichText::new("数据与路径排版展示")
+                        .size(m.h2_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new("数值、哈希、路径与时间戳在列表与日志面板中保持清晰对齐：")
+                        .size(m.secondary_size)
+                        .color(p.text_secondary),
+                );
+                ui.add_space(10.0);
+                egui::Frame::new()
+                    .fill(p.bg_canvas)
+                    .stroke(Stroke::new(1.0, p.border_subtle))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(
+                                RichText::new("编号       大小        校验摘要    更新时间")
+                                    .monospace()
+                                    .size(m.secondary_size)
+                                    .color(p.text_secondary),
+                            );
+                            ui.separator();
+                            for line in [
+                                "DOC-001      1.42 MB   A8F3-91C2   2026-11-24 09:18",
+                                "DOC-002     48.60 KB   4C19-DE07   2026-11-24 11:04",
+                                "DOC-003     12.15 KB   7B2E-04FA   2026-11-22 17:40",
+                                "DOC-004     18.75 MB   F05D-88B1   2026-11-20 14:22",
+                            ] {
+                                ui.label(
+                                    RichText::new(line)
+                                        .monospace()
+                                        .size(m.secondary_size)
+                                        .color(p.text_primary),
+                                );
+                            }
+                        });
                     });
-                },
-            );
-
-            ui.allocate_ui_with_layout(
-                egui::vec2(half_w, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(half_w);
-                    ui.set_max_width(half_w);
-                    surface_card(ui, p, m, |ui| {
-                        ui.set_width(half_inner_w);
-                        ui.set_max_width(half_inner_w);
-                        ui.set_min_height(220.0);
-                        ui.label(
-                            RichText::new("数据与路径排版展示")
-                                .size(m.h2_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new("数值、哈希、路径与时间戳在列表与日志面板中保持清晰对齐：")
-                                .size(m.secondary_size)
-                                .color(p.text_secondary),
-                        );
-                        ui.add_space(10.0);
-                        egui::Frame::new()
-                            .fill(p.bg_canvas)
-                            .stroke(Stroke::new(1.0, p.border_subtle))
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(egui::Margin::same(12))
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.set_width(ui.available_width());
-                                    ui.label(
-                                        RichText::new("编号       大小        校验摘要    更新时间")
-                                            .monospace()
-                                            .size(m.secondary_size)
-                                            .color(p.text_secondary),
-                                    );
-                                    ui.separator();
-                                    for line in [
-                                        "DOC-001      1.42 MB   A8F3-91C2   2026-11-24 09:18",
-                                        "DOC-002     48.60 KB   4C19-DE07   2026-11-24 11:04",
-                                        "DOC-003     12.15 KB   7B2E-04FA   2026-11-22 17:40",
-                                        "DOC-004     18.75 MB   F05D-88B1   2026-11-20 14:22",
-                                    ] {
-                                        ui.label(
-                                            RichText::new(line)
-                                                .monospace()
-                                                .size(m.secondary_size)
-                                                .color(p.text_primary),
-                                        );
-                                    }
-                                });
-                            });
-                    });
-                },
-            );
-        });
+            },
+            None::<fn(&mut egui::Ui)>,
+        );
     }
 
     fn render_workbench(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, p: Palette, m: DensityMetrics) {
@@ -944,15 +912,18 @@ impl ShowcaseApp {
                     self.search_query.clear();
                     self.status_filter = "全部状态";
                     self.simulate_empty = false;
+                    self.scanning = false;
+                    self.scan_progress = 0.0;
+                    self.scan_status_text.clear();
                     self.status_message = "已重置典型工具界面演示数据".to_owned();
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let search_edit = egui::TextEdit::singleline(&mut self.search_query)
                         .hint_text("搜索文件名、路径或编号…")
-                        .desired_width(210.0)
-                        .margin(egui::vec2(10.0, 7.0));
-                    let resp = ui.add(search_edit);
+                        .vertical_align(egui::Align::Center)
+                        .margin(egui::vec2(10.0, 0.0));
+                    let resp = ui.add_sized([210.0, m.control_height], search_edit);
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::TextEdit,
@@ -961,14 +932,16 @@ impl ShowcaseApp {
                         )
                     });
 
-                    egui::ComboBox::from_id_salt("workbench_status_filter")
-                        .selected_text(self.status_filter)
-                        .width(116.0)
-                        .show_ui(ui, |ui| {
-                            for opt in ["全部状态", "已通过", "需复核", "存在异常"] {
-                                ui.selectable_value(&mut self.status_filter, opt, opt);
-                            }
-                        });
+                    styled_dropdown(
+                        ui,
+                        p,
+                        m,
+                        "workbench_status_filter",
+                        "按状态筛选",
+                        &mut self.status_filter,
+                        &["全部状态", "已通过", "需复核", "存在异常"],
+                        124.0,
+                    );
                 });
             });
         });
@@ -1017,20 +990,23 @@ impl ShowcaseApp {
                     .size(m.secondary_size)
                     .color(p.text_secondary),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(&self.scan_status_text)
-                            .monospace()
-                            .size(m.caption_size)
-                            .color(p.text_secondary),
-                    );
-                    ui.add_space(10.0);
-                    let bar = egui::ProgressBar::new(self.scan_progress)
-                        .desired_width(180.0)
-                        .desired_height(8.0)
-                        .fill(p.accent_primary);
-                    ui.add(bar);
-                });
+                // 空闲待机态不显示进度条或占位文案，仅在核查进行中或刚产生进度结果时显示
+                if self.scanning || self.scan_progress > 0.0 {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(&self.scan_status_text)
+                                .monospace()
+                                .size(m.caption_size)
+                                .color(p.text_secondary),
+                        );
+                        ui.add_space(10.0);
+                        let bar = egui::ProgressBar::new(self.scan_progress)
+                            .desired_width(180.0)
+                            .desired_height(8.0)
+                            .fill(p.accent_primary);
+                        ui.add(bar);
+                    });
+                }
             });
         });
 
@@ -1108,185 +1084,181 @@ impl ShowcaseApp {
             return;
         }
 
-        // 左右分栏：左侧四列核查记录表 + 右侧选中项详情面板（严格限宽不重叠）
+        // 左右分栏：左侧四列核查记录表 + 右侧选中项详情面板（双栏严格等高齐平，底栏按钮贴底对齐）
         let avail_w = ui.available_width();
         let gap = 16.0;
         let right_w = ((avail_w - gap) * 0.36).clamp(280.0, 380.0).floor();
         let left_w = (avail_w - gap - right_w).max(400.0).floor();
+        let selected_snapshot = filtered
+            .iter()
+            .find(|t| self.selected_task_id.as_deref() == Some(t.id))
+            .cloned();
+        let mut clicked_id: Option<String> = None;
+        let mut delete_id: Option<String> = None;
 
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
+        equal_height_card_pair(
+            ui,
+            p,
+            m,
+            "workbench_list_and_detail",
+            left_w,
+            right_w,
+            gap,
+            |ui| {
+                let inner_w = ui.available_width();
+                workbench_task_header(ui, p, m, inner_w);
+                ui.add_space(8.0);
 
-            // 左侧列表卡片
-            ui.allocate_ui_with_layout(
-                egui::vec2(left_w, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(left_w);
-                    ui.set_max_width(left_w);
-                    surface_card(ui, p, m, |ui| {
-                        let inner_w = (left_w - f32::from(m.card_pad) * 2.0).max(320.0);
-                        ui.set_width(inner_w);
-                        ui.set_max_width(inner_w);
+                for (idx, item) in filtered.iter().enumerate() {
+                    let is_selected = self.selected_task_id.as_deref() == Some(item.id);
+                    if workbench_task_row(
+                        ui,
+                        p,
+                        m,
+                        inner_w,
+                        item.id,
+                        item.file_name,
+                        item.folder,
+                        item.size,
+                        item.status,
+                        item.kind,
+                        is_selected,
+                    )
+                    .clicked()
+                    {
+                        clicked_id = Some(item.id.to_owned());
+                    }
+                    if idx + 1 < filtered.len() {
+                        ui.add_space(6.0);
+                    }
+                }
+            },
+            |ui| {
+                let inner_w = ui.available_width();
+                if let Some(sel) = &selected_snapshot {
+                    ui.label(
+                        RichText::new("选中记录详情")
+                            .size(m.caption_size)
+                            .color(p.text_muted),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(sel.file_name)
+                            .size(m.h2_size)
+                            .color(p.text_primary),
+                    );
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
 
-                        workbench_task_header(ui, p, m, inner_w);
-                        ui.add_space(8.0);
+                    ui.label(RichText::new("记录编号").size(m.caption_size).color(p.text_muted));
+                    ui.label(
+                        RichText::new(sel.id)
+                            .monospace()
+                            .size(m.secondary_size)
+                            .color(p.text_primary),
+                    );
+                    ui.add_space(8.0);
 
-                        for item in &filtered {
-                            let is_selected =
-                                self.selected_task_id.as_deref() == Some(item.id);
-                            if workbench_task_row(
-                                ui,
-                                p,
-                                m,
-                                inner_w,
-                                item.id,
-                                item.file_name,
-                                item.folder,
-                                item.size,
-                                item.status,
-                                item.kind,
-                                is_selected,
-                            )
-                            .clicked()
-                            {
-                                self.selected_task_id = Some(item.id.to_owned());
-                            }
-                            ui.add_space(6.0);
-                        }
-                    });
-                },
-            );
+                    ui.label(RichText::new("所在目录").size(m.caption_size).color(p.text_muted));
+                    ui.label(
+                        RichText::new(sel.folder)
+                            .monospace()
+                            .size(m.secondary_size)
+                            .color(p.text_primary),
+                    );
+                    ui.add_space(8.0);
 
-            // 右侧详情面板
-            ui.allocate_ui_with_layout(
-                egui::vec2(right_w, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(right_w);
-                    ui.set_max_width(right_w);
-                    surface_card(ui, p, m, |ui| {
-                        let inner_w = (right_w - f32::from(m.card_pad) * 2.0).max(220.0);
-                        ui.set_width(inner_w);
-                        ui.set_max_width(inner_w);
-                        if let Some(sel) = filtered
-                            .iter()
-                            .find(|t| self.selected_task_id.as_deref() == Some(t.id))
-                        {
-                            ui.label(
-                                RichText::new("选中记录详情")
-                                    .size(m.caption_size)
-                                    .color(p.text_muted),
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                RichText::new(sel.file_name)
-                                    .size(m.h2_size)
-                                    .color(p.text_primary),
-                            );
-                            ui.add_space(8.0);
-                            ui.separator();
-                            ui.add_space(8.0);
-
-                            ui.label(RichText::new("记录编号").size(m.caption_size).color(p.text_muted));
-                            ui.label(
-                                RichText::new(sel.id)
-                                    .monospace()
-                                    .size(m.secondary_size)
-                                    .color(p.text_primary),
-                            );
-                            ui.add_space(8.0);
-
-                            ui.label(RichText::new("所在目录").size(m.caption_size).color(p.text_muted));
-                            ui.label(
-                                RichText::new(sel.folder)
-                                    .monospace()
-                                    .size(m.secondary_size)
-                                    .color(p.text_primary),
-                            );
-                            ui.add_space(8.0);
-
-                            // 文件大小与哈希摘要并排
-                            let half = ((inner_w - 12.0) * 0.5).max(90.0);
-                            ui.horizontal_top(|ui| {
-                                ui.spacing_mut().item_spacing.x = 12.0;
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(half, 0.0),
-                                    egui::Layout::top_down(egui::Align::LEFT),
-                                    |ui| {
-                                        ui.set_width(half);
-                                        ui.label(
-                                            RichText::new("文件大小")
-                                                .size(m.caption_size)
-                                                .color(p.text_muted),
-                                        );
-                                        ui.label(
-                                            RichText::new(sel.size.trim())
-                                                .monospace()
-                                                .size(m.secondary_size)
-                                                .color(p.text_primary),
-                                        );
-                                    },
+                    // 文件大小与哈希摘要并排
+                    let half = ((inner_w - 12.0) * 0.5).max(90.0);
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(half, 0.0),
+                            egui::Layout::top_down(egui::Align::LEFT),
+                            |ui| {
+                                ui.set_width(half);
+                                ui.label(
+                                    RichText::new("文件大小")
+                                        .size(m.caption_size)
+                                        .color(p.text_muted),
                                 );
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(half, 0.0),
-                                    egui::Layout::top_down(egui::Align::LEFT),
-                                    |ui| {
-                                        ui.set_width(half);
-                                        ui.label(
-                                            RichText::new("哈希摘要")
-                                                .size(m.caption_size)
-                                                .color(p.text_muted),
-                                        );
-                                        ui.label(
-                                            RichText::new(sel.sha)
-                                                .monospace()
-                                                .size(m.secondary_size)
-                                                .color(p.text_primary),
-                                        );
-                                    },
+                                ui.label(
+                                    RichText::new(sel.size.trim())
+                                        .monospace()
+                                        .size(m.secondary_size)
+                                        .color(p.text_primary),
                                 );
-                            });
-                            ui.add_space(8.0);
-
-                            ui.label(RichText::new("修改时间").size(m.caption_size).color(p.text_muted));
-                            ui.label(
-                                RichText::new(sel.modified)
-                                    .monospace()
-                                    .size(m.secondary_size)
-                                    .color(p.text_primary),
-                            );
-                            ui.add_space(10.0);
-
-                            status_banner(
-                                ui,
-                                p,
-                                m,
-                                sel.kind,
-                                &format!("核查结论：{}", sel.status),
-                                sel.note,
-                            );
-                            ui.add_space(12.0);
-                            ui.separator();
-                            ui.add_space(10.0);
-                            if styled_button(
-                                ui,
-                                p,
-                                m,
-                                "移除选中记录（演示二次确认）",
-                                ButtonKind::Danger,
-                                true,
-                                true,
-                            )
-                            .clicked()
-                            {
-                                self.confirm_delete_id = Some(sel.id.to_owned());
-                            }
-                        }
+                            },
+                        );
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(half, 0.0),
+                            egui::Layout::top_down(egui::Align::LEFT),
+                            |ui| {
+                                ui.set_width(half);
+                                ui.label(
+                                    RichText::new("哈希摘要")
+                                        .size(m.caption_size)
+                                        .color(p.text_muted),
+                                );
+                                ui.label(
+                                    RichText::new(sel.sha)
+                                        .monospace()
+                                        .size(m.secondary_size)
+                                        .color(p.text_primary),
+                                );
+                            },
+                        );
                     });
-                },
-            );
-        });
+                    ui.add_space(8.0);
+
+                    ui.label(RichText::new("修改时间").size(m.caption_size).color(p.text_muted));
+                    ui.label(
+                        RichText::new(sel.modified)
+                            .monospace()
+                            .size(m.secondary_size)
+                            .color(p.text_primary),
+                    );
+                    ui.add_space(10.0);
+
+                    status_banner(
+                        ui,
+                        p,
+                        m,
+                        sel.kind,
+                        &format!("核查结论：{}", sel.status),
+                        sel.note,
+                    );
+                }
+            },
+            Some(|ui: &mut egui::Ui| {
+                if let Some(sel) = &selected_snapshot {
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+                    if styled_button(
+                        ui,
+                        p,
+                        m,
+                        "移除选中记录（演示二次确认）",
+                        ButtonKind::Danger,
+                        true,
+                        true,
+                    )
+                    .clicked()
+                    {
+                        delete_id = Some(sel.id.to_owned());
+                    }
+                }
+            }),
+        );
+
+        if let Some(id) = clicked_id {
+            self.selected_task_id = Some(id);
+        }
+        if let Some(id) = delete_id {
+            self.confirm_delete_id = Some(id);
+        }
     }
 
     fn render_controls(&mut self, ui: &mut egui::Ui, p: Palette, m: DensityMetrics) {
@@ -1340,215 +1312,226 @@ impl ShowcaseApp {
 
         ui.add_space(m.section_gap);
 
-        // 输入与内联错误 + 开关/分段/滑块（严格双列 top_down 布局与列宽约束）
+        // 输入与内联错误 + 开关/分段/滑块（严格双列等高齐平，上下边框完全对齐）
         let pair_gap = 14.0;
         let half_w = ((ui.available_width() - pair_gap) / 2.0).floor().max(280.0);
         let half_inner_w = (half_w - f32::from(m.card_pad) * 2.0).max(220.0);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = pair_gap;
-            ui.allocate_ui_with_layout(
-                egui::vec2(half_w, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(half_w);
-                    ui.set_max_width(half_w);
-                    surface_card(ui, p, m, |ui| {
-                        ui.set_width(half_inner_w);
-                        ui.set_max_width(half_inner_w);
-                        ui.set_min_height(270.0);
-                        ui.label(
-                            RichText::new("输入框与内联校验错误")
-                                .size(m.h2_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new("校验错误紧贴控件下方以「[错误] + 中文原因」呈现，不单靠颜色区分。")
-                                .size(m.secondary_size)
-                                .color(p.text_secondary),
-                        );
-                        ui.add_space(12.0);
-                        ui.label(
-                            RichText::new("目标工作目录")
-                                .size(m.body_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        let edit = egui::TextEdit::singleline(&mut self.demo_path)
-                            .hint_text(r"请输入绝对路径，例如 D:\Codex\UiShowcase")
-                            .desired_width(half_inner_w - 22.0)
-                            .margin(egui::vec2(10.0, 8.0));
-                        let resp = ui.add(edit);
-                        resp.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::TextEdit,
-                                true,
-                                "目标工作目录",
-                            )
-                        });
+        let mut demo_path = self.demo_path.clone();
+        let mut demo_combo = self.demo_combo;
+        let mut demo_toggle_a = self.demo_toggle_a;
+        let mut demo_toggle_b = self.demo_toggle_b;
+        let mut demo_segment = self.demo_segment;
+        let mut demo_slider = self.demo_slider;
+        let mut status_update: Option<String> = None;
+        let path_err = self.demo_path_error();
 
-                        if let Some(err) = self.demo_path_error() {
-                            ui.add_space(6.0);
-                            status_banner(
-                                ui,
-                                p,
-                                m,
-                                StatusKind::Danger,
-                                &format!("[错误] {err}"),
-                                "",
-                            );
-                        }
+        equal_height_card_pair(
+            ui,
+            p,
+            m,
+            "controls_form_and_toggles",
+            half_w,
+            half_w,
+            pair_gap,
+            |ui| {
+                ui.label(
+                    RichText::new("输入框与内联校验错误")
+                        .size(m.h2_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("校验错误紧贴控件下方以「[错误] + 中文原因」呈现，不单靠颜色区分。")
+                        .size(m.secondary_size)
+                        .color(p.text_secondary),
+                );
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("目标工作目录")
+                        .size(m.body_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(4.0);
+                let edit = egui::TextEdit::singleline(&mut demo_path)
+                    .hint_text(r"请输入绝对路径，例如 D:\Codex\UiShowcase")
+                    .desired_width(half_inner_w - 22.0)
+                    .margin(egui::vec2(10.0, 8.0));
+                let resp = ui.add(edit);
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::TextEdit,
+                        true,
+                        "目标工作目录",
+                    )
+                });
 
-                        ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            if styled_button(
-                                ui,
-                                p,
-                                m,
-                                "模拟非法输入",
-                                ButtonKind::Secondary,
-                                true,
-                                false,
-                            )
-                            .clicked()
-                            {
-                                self.demo_path = "invalid*path?".to_owned();
-                            }
-                            if styled_button(
-                                ui,
-                                p,
-                                m,
-                                "恢复合法路径",
-                                ButtonKind::Ghost,
-                                true,
-                                false,
-                            )
-                            .clicked()
-                            {
-                                self.demo_path = r"D:\Codex\UiShowcase".to_owned();
-                            }
-                        });
+                if let Some(err) = path_err {
+                    ui.add_space(6.0);
+                    status_banner(
+                        ui,
+                        p,
+                        m,
+                        StatusKind::Danger,
+                        &format!("[错误] {err}"),
+                        "",
+                    );
+                }
 
-                        ui.add_space(14.0);
-                        ui.label(
-                            RichText::new("下拉选择（深浅色弹层全适配）")
-                                .size(m.body_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        egui::ComboBox::from_id_salt("demo_mode_combo")
-                            .selected_text(self.demo_combo)
-                            .width(half_inner_w)
-                            .show_ui(ui, |ui| {
-                                for opt in [
-                                    "标准校验（推荐）",
-                                    "严格哈希比对",
-                                    "仅校验文件名与大小",
-                                    "快速跳过大文件",
-                                ] {
-                                    ui.selectable_value(&mut self.demo_combo, opt, opt);
-                                }
-                            });
-                    });
-                },
-            );
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if styled_button(
+                        ui,
+                        p,
+                        m,
+                        "模拟非法输入",
+                        ButtonKind::Secondary,
+                        true,
+                        false,
+                    )
+                    .clicked()
+                    {
+                        demo_path = "invalid*path?".to_owned();
+                    }
+                    if styled_button(
+                        ui,
+                        p,
+                        m,
+                        "恢复合法路径",
+                        ButtonKind::Ghost,
+                        true,
+                        false,
+                    )
+                    .clicked()
+                    {
+                        demo_path = r"D:\Codex\UiShowcase".to_owned();
+                    }
+                });
 
-            ui.allocate_ui_with_layout(
-                egui::vec2(half_w, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(half_w);
-                    ui.set_max_width(half_w);
-                    surface_card(ui, p, m, |ui| {
-                        ui.set_width(half_inner_w);
-                        ui.set_max_width(half_inner_w);
-                        ui.set_min_height(270.0);
-                        ui.label(
-                            RichText::new("开关、分段选择与数值调节")
-                                .size(m.h2_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(12.0);
+                ui.add_space(14.0);
+                ui.label(
+                    RichText::new("下拉选择（深浅色弹层全适配）")
+                        .size(m.body_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(4.0);
+                styled_dropdown(
+                    ui,
+                    p,
+                    m,
+                    "demo_mode_combo",
+                    "校验模式",
+                    &mut demo_combo,
+                    &[
+                        "标准校验（推荐）",
+                        "严格哈希比对",
+                        "仅校验文件名与大小",
+                        "快速跳过大文件",
+                    ],
+                    half_inner_w,
+                );
+            },
+            |ui| {
+                ui.label(
+                    RichText::new("开关、分段选择与数值调节")
+                        .size(m.h2_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(12.0);
 
-                        if toggle_switch(
-                            ui,
-                            p,
-                            m,
-                            &mut self.demo_toggle_a,
-                            "保存配置时自动校验完整性",
-                        )
-                        .changed()
-                        {
-                            self.status_message = format!(
-                                "示例开关「保存配置时自动校验完整性」已{}",
-                                if self.demo_toggle_a { "开启" } else { "关闭" }
-                            );
-                        }
-                        ui.add_space(10.0);
-                        if toggle_switch(
-                            ui,
-                            p,
-                            m,
-                            &mut self.demo_toggle_b,
-                            "列表中仅展示存在异常的记录",
-                        )
-                        .changed()
-                        {
-                            self.status_message = format!(
-                                "示例开关「列表中仅展示存在异常的记录」已{}",
-                                if self.demo_toggle_b { "开启" } else { "关闭" }
-                            );
-                        }
+                if toggle_switch(
+                    ui,
+                    p,
+                    m,
+                    &mut demo_toggle_a,
+                    "保存配置时自动校验完整性",
+                )
+                .changed()
+                {
+                    status_update = Some(format!(
+                        "示例开关「保存配置时自动校验完整性」已{}",
+                        if demo_toggle_a { "开启" } else { "关闭" }
+                    ));
+                }
+                ui.add_space(10.0);
+                if toggle_switch(
+                    ui,
+                    p,
+                    m,
+                    &mut demo_toggle_b,
+                    "列表中仅展示存在异常的记录",
+                )
+                .changed()
+                {
+                    status_update = Some(format!(
+                        "示例开关「列表中仅展示存在异常的记录」已{}",
+                        if demo_toggle_b { "开启" } else { "关闭" }
+                    ));
+                }
 
-                        ui.add_space(16.0);
-                        ui.label(
-                            RichText::new("分段选择（互斥模式切换）")
-                                .size(m.body_size)
-                                .color(p.text_primary),
-                        );
-                        ui.add_space(6.0);
-                        segment_bar(
-                            ui,
-                            p,
-                            m,
-                            &mut self.demo_segment,
-                            &[(0, "精确匹配"), (1, "模糊检索"), (2, "正则规则")],
-                            "匹配模式",
-                        );
+                ui.add_space(16.0);
+                ui.label(
+                    RichText::new("分段选择（互斥模式切换）")
+                        .size(m.body_size)
+                        .color(p.text_primary),
+                );
+                ui.add_space(6.0);
+                segment_bar(
+                    ui,
+                    p,
+                    m,
+                    &mut demo_segment,
+                    &[(0, "精确匹配"), (1, "模糊检索"), (2, "正则规则")],
+                    "匹配模式",
+                );
 
-                        ui.add_space(16.0);
-                        ui.horizontal(|ui| {
-                            ui.set_width(half_inner_w);
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    ui.set_width(half_inner_w);
+                    ui.label(
+                        RichText::new("并发扫描阈值")
+                            .size(m.body_size)
+                            .color(p.text_primary),
+                    );
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
                             ui.label(
-                                RichText::new("并发扫描阈值")
+                                RichText::new(format!("{:.0}%", demo_slider))
+                                    .monospace()
                                     .size(m.body_size)
-                                    .color(p.text_primary),
+                                    .color(p.accent_primary),
                             );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        RichText::new(format!("{:.0}%", self.demo_slider))
-                                            .monospace()
-                                            .size(m.body_size)
-                                            .color(p.accent_primary),
-                                    );
-                                },
-                            );
-                        });
-                        ui.add_space(4.0);
-                        let slider = egui::Slider::new(&mut self.demo_slider, 10.0..=100.0)
-                            .step_by(5.0)
-                            .show_value(false);
-                        ui.add_sized([half_inner_w, 26.0], slider);
-                    });
-                },
-            );
-        });
+                        },
+                    );
+                });
+                ui.add_space(4.0);
+                styled_slider(
+                    ui,
+                    p,
+                    &mut demo_slider,
+                    10.0,
+                    100.0,
+                    5.0,
+                    half_inner_w,
+                    "并发扫描阈值",
+                );
+            },
+            None::<fn(&mut egui::Ui)>,
+        );
+
+        self.demo_path = demo_path;
+        self.demo_combo = demo_combo;
+        self.demo_toggle_a = demo_toggle_a;
+        self.demo_toggle_b = demo_toggle_b;
+        self.demo_segment = demo_segment;
+        self.demo_slider = demo_slider;
+        if let Some(msg) = status_update {
+            self.status_message = msg;
+        }
 
         ui.add_space(m.section_gap);
 
-        // 状态反馈四件套（严格 2×2 top_down 网格，绝不重叠错乱）
+        // 状态反馈四件套（预排测高锁定 4 个框精确等宽等高，左对齐垂直居中）
         surface_card(ui, p, m, |ui| {
             let panel_inner_w = ui.available_width();
             ui.set_width(panel_inner_w);
@@ -1558,79 +1541,34 @@ impl ShowcaseApp {
                     .color(p.text_primary),
             );
             ui.add_space(12.0);
-            let b_gap = 12.0;
-            let bw = ((panel_inner_w - b_gap) / 2.0).floor().max(240.0);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = b_gap;
-                ui.allocate_ui_with_layout(
-                    egui::vec2(bw, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_width(bw);
-                        ui.set_max_width(bw);
-                        status_banner(
-                            ui,
-                            p,
-                            m,
-                            StatusKind::Info,
-                            "[信息] OpenGL (glow) 按物理像素实时光栅化",
-                            "字形图集与屏幕真实缩放倍率 1:1 匹配，100%/125%/150%/200% 均锐利清晰。",
-                        );
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    egui::vec2(bw, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_width(bw);
-                        ui.set_max_width(bw);
-                        status_banner(
-                            ui,
-                            p,
-                            m,
-                            StatusKind::Success,
-                            "[成功] 本地设置已持久化保存",
-                            "重启应用后自动恢复当前字体、主题模式、强调色、界面密度与托盘行为。",
-                        );
-                    },
-                );
-            });
-            ui.add_space(10.0);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = b_gap;
-                ui.allocate_ui_with_layout(
-                    egui::vec2(bw, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_width(bw);
-                        ui.set_max_width(bw);
-                        status_banner(
-                            ui,
-                            p,
-                            m,
-                            StatusKind::Warning,
-                            "[警告] 检测到 1 项需人工复核的旧版配置",
-                            "警告色与品牌强调色彻底解耦，避免混淆正常高亮与风险提示。",
-                        );
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    egui::vec2(bw, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_width(bw);
-                        ui.set_max_width(bw);
-                        status_banner(
-                            ui,
-                            p,
-                            m,
-                            StatusKind::Danger,
-                            "[错误] 目标目录不可写或权限不足",
-                            "面向用户的系统错误须转换为可理解的简体中文说明与处理建议。",
-                        );
-                    },
-                );
-            });
+            status_banner_grid(
+                ui,
+                p,
+                m,
+                &[
+                    (
+                        StatusKind::Info,
+                        "[信息] OpenGL (glow) 按物理像素实时光栅化",
+                        "字形图集与屏幕真实缩放倍率 1:1 匹配，100%/125%/150%/200% 均锐利清晰。",
+                    ),
+                    (
+                        StatusKind::Success,
+                        "[成功] 本地设置已持久化保存",
+                        "重启应用后自动恢复当前字体、主题模式、强调色、界面密度与托盘行为。",
+                    ),
+                    (
+                        StatusKind::Warning,
+                        "[警告] 检测到 1 项需人工复核的旧版配置",
+                        "警告色与品牌强调色彻底解耦，避免混淆正常高亮与风险提示。",
+                    ),
+                    (
+                        StatusKind::Danger,
+                        "[错误] 目标目录不可写或权限不足",
+                        "面向用户的系统错误须转换为可理解的简体中文说明与处理建议。",
+                    ),
+                ],
+                panel_inner_w,
+            );
         });
     }
 

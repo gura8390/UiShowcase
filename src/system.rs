@@ -21,12 +21,13 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
-    DestroyWindow, DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, IMAGE_ICON,
-    LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow, TPM_BOTTOMALIGN,
-    TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
-    WM_APP, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    DestroyWindow, DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, HWND_TOPMOST,
+    IMAGE_ICON, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SetForegroundWindow, SetWindowPos, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, TranslateMessage, WM_APP, WM_CONTEXTMENU,
+    WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 const APP_ICON_ID: usize = 1;
@@ -38,6 +39,7 @@ const MSG_EXIT_CMD: u32 = WM_APP + 4;
 const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
 
 static TASKBAR_CREATED_MSG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static TRAY_V4: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const MENU_OPEN: u32 = 1001;
 const MENU_SETTINGS: u32 = 1002;
@@ -149,7 +151,7 @@ impl TrayController {
             RegisterClassW(&wc);
 
             let hwnd = CreateWindowExW(
-                WS_EX_TOOLWINDOW,
+                WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
                 class_name.as_ptr(),
                 class_name.as_ptr(),
                 WS_POPUP,
@@ -261,9 +263,8 @@ unsafe fn add_tray_icon(hwnd: HWND) -> bool {
         ver.hWnd = hwnd;
         ver.uID = TRAY_ID;
         ver.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-        unsafe {
-            Shell_NotifyIconW(NIM_SETVERSION, &ver);
-        }
+        let v4_ok = unsafe { Shell_NotifyIconW(NIM_SETVERSION, &ver) != 0 };
+        TRAY_V4.store(v4_ok, std::sync::atomic::Ordering::Relaxed);
     }
     unsafe {
         DestroyIcon(hicon);
@@ -310,13 +311,28 @@ unsafe extern "system" fn tray_wnd_proc(
             0
         }
         MSG_TRAY => {
+            let v4 = TRAY_V4.load(std::sync::atomic::Ordering::Relaxed);
             let event = (lparam as u32) & 0xFFFF;
             match event {
-                WM_LBUTTONDBLCLK | WM_LBUTTONUP | NIN_SELECT | NIN_KEYSELECT => {
+                WM_LBUTTONDBLCLK | WM_LBUTTONUP if !v4 => {
                     emit_event(TrayEvent::OpenMain);
                 }
-                WM_RBUTTONUP | WM_CONTEXTMENU => unsafe {
-                    show_tray_menu(hwnd);
+                NIN_SELECT | NIN_KEYSELECT => {
+                    emit_event(TrayEvent::OpenMain);
+                }
+                // NOTIFYICON_VERSION_4 下右键会依次发送 WM_RBUTTONUP 与 WM_CONTEXTMENU；
+                // 仅在 WM_CONTEXTMENU 时弹出菜单，避免在任务栏抢占焦点期间弹出导致菜单落到任务栏后方
+                WM_RBUTTONUP | WM_CONTEXTMENU if !v4 => unsafe {
+                    show_tray_menu(hwnd, None);
+                },
+                WM_CONTEXTMENU => unsafe {
+                    show_tray_menu(
+                        hwnd,
+                        Some(POINT {
+                            x: wparam as i16 as i32,
+                            y: (wparam >> 16) as i16 as i32,
+                        }),
+                    );
                 },
                 _ => {}
             }
@@ -335,7 +351,7 @@ unsafe extern "system" fn tray_wnd_proc(
     }
 }
 
-unsafe fn show_tray_menu(hwnd: HWND) {
+unsafe fn show_tray_menu(hwnd: HWND, anchor: Option<POINT>) {
     let menu = unsafe { CreatePopupMenu() };
     if menu.is_null() {
         return;
@@ -357,20 +373,34 @@ unsafe fn show_tray_menu(hwnd: HWND) {
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, MENU_EXIT as usize, exit_txt.as_ptr());
 
-        let mut pt = POINT { x: 0, y: 0 };
-        GetCursorPos(&mut pt);
+        let pt = anchor
+            .filter(|p| p.x != -1 || p.y != -1)
+            .unwrap_or_else(|| {
+                let mut p = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut p);
+                p
+            });
+        // 确保隐藏宿主窗口位于 HWND_TOPMOST 且为前台窗口，使右键菜单稳定显示在任务栏最前方
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
         SetForegroundWindow(hwnd);
-        let cmd = TrackPopupMenu(
+        let cmd = TrackPopupMenuEx(
             menu,
             TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
             pt.x,
             pt.y,
-            0,
             hwnd,
             null(),
         ) as u32;
         DestroyMenu(menu);
-        // Win32 KB135788：TrackPopupMenu 结束后须投递 WM_NULL，防止托盘菜单粘滞或阻塞后续退出
+        // Win32 KB135788：TrackPopupMenuEx 结束后须投递 WM_NULL，防止托盘菜单粘滞或阻塞后续退出
         PostMessageW(hwnd, WM_NULL, 0, 0);
 
         match cmd {
