@@ -149,7 +149,7 @@ pub fn styled_button(
     }
 }
 
-/// 左侧导航项（带左侧 3px 强调色指示条 + 精确垂直居中 + AccessKit 选中语义）
+/// 左侧导航项（完整五态 Default/Hover/Pressed/Disabled/Focused + 左侧 3px 选中指示条 + AccessKit 语义）
 pub fn nav_item(
     ui: &mut Ui,
     p: Palette,
@@ -157,30 +157,37 @@ pub fn nav_item(
     label: &str,
     selected: bool,
 ) -> Response {
+    let enabled = ui.is_enabled();
     let desired = Vec2::new(ui.available_width(), m.nav_item_height);
-    let (rect, response) = ui.allocate_exact_size(desired, Sense::click());
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(desired, sense);
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::SelectableLabel,
-            ui.is_enabled(),
+            enabled,
             selected,
             format!("导航：{label}"),
         )
     });
 
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let bg = if selected {
-            p.bg_selected
+        let hovered = enabled && response.hovered();
+        let pressed = enabled && response.is_pointer_button_down_on();
+        let focused = enabled && response.has_focus();
+
+        let (bg, fg) = if !enabled {
+            (
+                if selected { p.bg_disabled } else { Color32::TRANSPARENT },
+                p.text_disabled,
+            )
+        } else if pressed {
+            (p.bg_pressed, p.text_primary)
+        } else if selected {
+            (p.bg_selected, p.text_primary)
         } else if hovered {
-            p.bg_hover
+            (p.bg_hover, p.text_primary)
         } else {
-            Color32::TRANSPARENT
-        };
-        let fg = if selected || hovered {
-            p.text_primary
-        } else {
-            p.text_secondary
+            (Color32::TRANSPARENT, p.text_secondary)
         };
 
         let painter = ui.painter();
@@ -192,10 +199,14 @@ pub fn nav_item(
                 egui::pos2(rect.left() + 4.0, rect.center().y - ind_h / 2.0),
                 Vec2::new(3.0, ind_h),
             );
-            painter.rect_filled(ind_rect, CornerRadius::same(2), p.accent_primary);
+            painter.rect_filled(
+                ind_rect,
+                CornerRadius::same(2),
+                if enabled { p.accent_primary } else { p.text_disabled },
+            );
         }
 
-        if response.has_focus() {
+        if focused {
             painter.rect_stroke(
                 rect.expand(2.0),
                 CornerRadius::same(7),
@@ -213,10 +224,14 @@ pub fn nav_item(
         );
     }
 
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
-/// 分段选择控件（水平与视觉垂直双居中 + AccessKit 语义）
+/// 分段选择控件（完整五态 + 水平与垂直双居中 + AccessKit 语义）
 pub fn segment_bar<T: Copy + PartialEq>(
     ui: &mut Ui,
     p: Palette,
@@ -226,8 +241,9 @@ pub fn segment_bar<T: Copy + PartialEq>(
     group_prefix: &str,
 ) -> bool {
     let mut changed = false;
+    let enabled = ui.is_enabled();
     egui::Frame::new()
-        .fill(p.bg_control_alt)
+        .fill(if enabled { p.bg_control_alt } else { p.bg_disabled })
         .stroke(Stroke::new(1.0, p.border_subtle))
         .corner_radius(CornerRadius::same(6))
         .inner_margin(egui::Margin::same(2))
@@ -243,31 +259,52 @@ pub fn segment_bar<T: Copy + PartialEq>(
                         p.text_primary,
                     );
                     let size = Vec2::new((galley.size().x + 22.0).max(52.0), m.control_height - 6.0);
-                    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+                    let sense = if enabled { Sense::click() } else { Sense::hover() };
+                    let (rect, resp) = ui.allocate_exact_size(size, sense);
                     resp.widget_info(|| {
                         WidgetInfo::selected(
                             WidgetType::RadioButton,
-                            true,
+                            enabled,
                             selected,
                             format!("{group_prefix}：{label}"),
                         )
                     });
 
                     if ui.is_rect_visible(rect) {
+                        let hovered = enabled && resp.hovered();
+                        let pressed = enabled && resp.is_pointer_button_down_on();
+                        let focused = enabled && resp.has_focus();
+
                         let painter = ui.painter();
-                        let (bg, stroke, fg) = if selected {
+                        let (bg, stroke, fg) = if !enabled {
+                            if selected {
+                                (
+                                    p.bg_surface,
+                                    Stroke::new(1.0, p.border_subtle),
+                                    p.text_disabled,
+                                )
+                            } else {
+                                (Color32::TRANSPARENT, Stroke::NONE, p.text_disabled)
+                            }
+                        } else if pressed {
+                            (
+                                p.bg_pressed,
+                                Stroke::new(1.0, p.border_strong),
+                                p.text_primary,
+                            )
+                        } else if selected {
                             (
                                 p.bg_surface,
                                 Stroke::new(1.0, p.border_control),
                                 p.text_primary,
                             )
-                        } else if resp.hovered() {
+                        } else if hovered {
                             (p.bg_hover, Stroke::NONE, p.text_primary)
                         } else {
                             (Color32::TRANSPARENT, Stroke::NONE, p.text_secondary)
                         };
                         painter.rect(rect, CornerRadius::same(4), bg, stroke, StrokeKind::Inside);
-                        if resp.has_focus() {
+                        if focused {
                             painter.rect_stroke(
                                 rect.expand(2.0),
                                 CornerRadius::same(5),
@@ -278,7 +315,12 @@ pub fn segment_bar<T: Copy + PartialEq>(
                         painter.text(rect.center(), Align2::CENTER_CENTER, label, font_id, fg);
                     }
 
-                    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !selected {
+                    let resp = if enabled {
+                        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+                    } else {
+                        resp
+                    };
+                    if enabled && resp.clicked() && !selected {
                         *current = val;
                         changed = true;
                     }
@@ -288,7 +330,7 @@ pub fn segment_bar<T: Copy + PartialEq>(
     changed
 }
 
-/// 现代拨动开关（带滑轨圆点 + 居中对齐中文标签 + AccessKit Checkbox 语义）
+/// 现代拨动开关（完整五态 + 100ms 顺滑圆点动效且尊重系统减少动画 + 窄窗自动换行防溢出 + AccessKit 语义）
 pub fn toggle_switch(
     ui: &mut Ui,
     p: Palette,
@@ -296,39 +338,51 @@ pub fn toggle_switch(
     checked: &mut bool,
     label: &str,
 ) -> Response {
+    let enabled = ui.is_enabled();
     let font_id = FontId::proportional(m.body_size);
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), font_id.clone(), p.text_primary);
     let track_w: f32 = 40.0;
     let track_h: f32 = 22.0;
     let gap = 10.0;
-    let total_w = track_w + gap + galley.size().x + 4.0;
+    let max_label_w = (ui.available_width() - track_w - gap - 4.0).max(80.0);
+    let label_color = if enabled { p.text_primary } else { p.text_disabled };
+    let galley = layout_left_wrapped(ui.painter(), label, font_id, label_color, max_label_w);
+    let total_w = (track_w + gap + galley.size().x + 4.0).min(ui.available_width().max(track_w + gap + 80.0));
     let total_h = track_h.max(galley.size().y + 4.0);
 
-    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(total_w, total_h), Sense::click());
-    if response.clicked() {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(total_w, total_h), sense);
+    if enabled && response.clicked() {
         *checked = !*checked;
         response.mark_changed();
     }
 
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, *checked, label));
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, *checked, label));
 
     if ui.is_rect_visible(rect) {
+        let hovered = enabled && response.hovered();
+        let pressed = enabled && response.is_pointer_button_down_on();
+        let focused = enabled && response.has_focus();
+
         let painter = ui.painter();
         let track_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left(), rect.center().y - track_h / 2.0),
             Vec2::new(track_w, track_h),
         );
-        let (track_bg, track_border, thumb_fill) = if *checked {
-            let bg = if response.hovered() {
+        let (track_bg, track_border, thumb_fill) = if !enabled {
+            (p.bg_disabled, p.border_subtle, p.text_disabled)
+        } else if *checked {
+            let bg = if pressed {
+                p.accent_pressed
+            } else if hovered {
                 p.accent_hover
             } else {
                 p.accent_primary
             };
             (bg, bg, p.text_on_accent)
         } else {
-            let bg = if response.hovered() {
+            let bg = if pressed {
+                p.bg_pressed
+            } else if hovered {
                 p.bg_hover
             } else {
                 p.bg_control_alt
@@ -344,15 +398,19 @@ pub fn toggle_switch(
             StrokeKind::Inside,
         );
 
-        let thumb_r = 7.0;
-        let thumb_x = if *checked {
-            track_rect.right() - 4.0 - thumb_r
+        let anim_secs = if crate::system::prefers_reduced_motion() {
+            0.0
         } else {
-            track_rect.left() + 4.0 + thumb_r
+            0.10
         };
+        let t = ui.ctx().animate_bool_with_time(response.id, *checked, anim_secs);
+        let thumb_r = if pressed { 7.5 } else { 7.0 };
+        let x_off = track_rect.left() + 4.0 + 7.0;
+        let x_on = track_rect.right() - 4.0 - 7.0;
+        let thumb_x = egui::lerp(x_off..=x_on, t);
         painter.circle_filled(egui::pos2(thumb_x, track_rect.center().y), thumb_r, thumb_fill);
 
-        if response.has_focus() {
+        if focused {
             painter.rect_stroke(
                 track_rect.expand(2.5),
                 CornerRadius::same(13),
@@ -361,16 +419,19 @@ pub fn toggle_switch(
             );
         }
 
-        painter.text(
-            egui::pos2(track_rect.right() + gap, rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            font_id,
-            p.text_primary,
+        let text_y = (rect.center().y - galley.size().y * 0.5).round();
+        painter.galley(
+            egui::pos2(track_rect.right() + gap, text_y),
+            galley,
+            label_color,
         );
     }
 
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 /// 语义状态徽章（视觉居中胶囊；非交互展示标签允许拖选复制）
@@ -390,18 +451,16 @@ pub fn status_badge(ui: &mut Ui, p: Palette, m: DensityMetrics, text: &str, kind
             Stroke::new(1.0, bd),
             StrokeKind::Inside,
         );
-        ui.scope_builder(
+        let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect)
                 .layout(egui::Layout::centered_and_justified(
                     egui::Direction::LeftToRight,
                 )),
-            |ui| {
-                ui.add(
-                    egui::Label::new(egui::RichText::new(text).size(m.caption_size).color(fg))
-                        .selectable(true),
-                );
-            },
+        );
+        child.add(
+            egui::Label::new(egui::RichText::new(text).size(m.caption_size).color(fg))
+                .selectable(true),
         );
     }
 }
@@ -502,18 +561,15 @@ pub fn workbench_task_header(ui: &mut Ui, p: Palette, m: DensityMetrics, width: 
         );
 
         let place_hdr = |ui: &mut Ui, col_rect: egui::Rect, layout: egui::Layout, text: &str| {
-            ui.scope_builder(
-                egui::UiBuilder::new().max_rect(col_rect).layout(layout),
-                |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(text)
-                                .size(m.h3_size)
-                                .color(p.text_primary),
-                        )
-                        .selectable(true),
-                    );
-                },
+            let mut child =
+                ui.new_child(egui::UiBuilder::new().max_rect(col_rect).layout(layout));
+            child.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(m.h3_size)
+                        .color(p.text_primary),
+                )
+                .selectable(true),
             );
         };
 
@@ -600,29 +656,41 @@ pub fn workbench_task_row(
     kind: StatusKind,
     selected: bool,
 ) -> Response {
+    let enabled = ui.is_enabled();
     let row_h = if m.control_height <= 30.0 { 48.0 } else { 58.0 };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, row_h), Sense::click());
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, row_h), sense);
 
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::SelectableLabel,
-            true,
+            enabled,
             selected,
             format!("{id} {file_name} {status}"),
         )
     });
 
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let bg = if selected {
+        let hovered = enabled && response.hovered();
+        let pressed = enabled && response.is_pointer_button_down_on();
+        let focused = enabled && response.has_focus();
+        let bg = if !enabled {
+            p.bg_disabled
+        } else if pressed {
+            p.bg_pressed
+        } else if selected {
             p.bg_selected
         } else if hovered {
             p.bg_hover
         } else {
             Color32::TRANSPARENT
         };
-        let border = if selected {
+        let border = if !enabled {
+            p.border_subtle
+        } else if selected {
             p.accent_primary
+        } else if pressed || hovered {
+            p.border_control
         } else {
             p.border_subtle
         };
@@ -642,10 +710,14 @@ pub fn workbench_task_row(
                 egui::pos2(rect.left() + 4.0, rect.center().y - ind_h * 0.5),
                 Vec2::new(3.0, ind_h),
             );
-            painter.rect_filled(ind_rect, CornerRadius::same(2), p.accent_primary);
+            painter.rect_filled(
+                ind_rect,
+                CornerRadius::same(2),
+                if enabled { p.accent_primary } else { p.text_disabled },
+            );
         }
 
-        if response.has_focus() {
+        if focused {
             painter.rect_stroke(
                 rect.expand(2.0),
                 CornerRadius::same(7),
@@ -657,13 +729,17 @@ pub fn workbench_task_row(
         let cols = workbench_cols(rect);
         let cy = rect.center().y;
 
+        let id_color = if enabled { p.text_secondary } else { p.text_disabled };
+        let name_color = if enabled { p.text_primary } else { p.text_disabled };
+        let folder_color = if enabled { p.text_muted } else { p.text_disabled };
+
         // 列 0：编号
         painter.text(
             egui::pos2(cols.id_left, cy),
             Align2::LEFT_CENTER,
             id,
             FontId::monospace(m.caption_size),
-            p.text_secondary,
+            id_color,
         );
 
         // 列 1：文件名 + 目录（严格裁剪与单行省略，绝不越界重叠）
@@ -671,14 +747,14 @@ pub fn workbench_task_row(
             painter,
             file_name,
             FontId::proportional(m.body_size),
-            p.text_primary,
+            name_color,
             cols.name_width,
         );
         let folder_galley = layout_ellipsized(
             painter,
             folder,
             FontId::proportional(m.caption_size),
-            p.text_muted,
+            folder_color,
             cols.name_width,
         );
         let line_gap = 3.0;
@@ -689,11 +765,11 @@ pub fn workbench_task_row(
             Vec2::new(cols.name_width + 2.0, rect.height() - 4.0),
         );
         let name_painter = painter.with_clip_rect(name_clip);
-        name_painter.galley(egui::pos2(cols.name_left, top_y), name_galley.clone(), p.text_primary);
+        name_painter.galley(egui::pos2(cols.name_left, top_y), name_galley.clone(), name_color);
         name_painter.galley(
             egui::pos2(cols.name_left, top_y + name_galley.size().y + line_gap),
             folder_galley,
-            p.text_muted,
+            folder_color,
         );
 
         // 列 2：大小（右对齐等宽）
@@ -702,11 +778,15 @@ pub fn workbench_task_row(
             Align2::RIGHT_CENTER,
             size.trim(),
             FontId::monospace(m.caption_size),
-            p.text_secondary,
+            id_color,
         );
 
         // 列 3：状态胶囊徽章（几何居中）
-        let (fg, badge_bg, badge_bd) = status_colors(p, kind);
+        let (fg, badge_bg, badge_bd) = if enabled {
+            status_colors(p, kind)
+        } else {
+            (p.text_disabled, p.bg_disabled, p.border_subtle)
+        };
         let badge_font = FontId::proportional(m.caption_size);
         let badge_galley = painter.layout_no_wrap(status.to_owned(), badge_font.clone(), fg);
         let badge_w = (badge_galley.size().x + 18.0).min(cols.status_width);
@@ -724,7 +804,11 @@ pub fn workbench_task_row(
         painter.text(badge_rect.center(), Align2::CENTER_CENTER, status, badge_font, fg);
     }
 
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 fn layout_left_wrapped(
@@ -763,10 +847,19 @@ pub fn principle_card_row(
     if cards.is_empty() {
         return;
     }
-    let count = cards.len() as f32;
     let gap = 12.0;
     let avail_w = ui.available_width();
-    let card_w = ((avail_w - gap * (count - 1.0)) / count).floor().max(160.0);
+    // 窄窗（如 820px 最小窗口下可用宽 ~540pt）自动从 4×1 折为 2×2 等高网格，杜绝横向溢出
+    let cols = if avail_w >= 700.0 {
+        cards.len().min(4)
+    } else if avail_w >= 360.0 {
+        2
+    } else {
+        1
+    };
+    let card_w = ((avail_w - gap * (cols as f32 - 1.0)) / cols as f32)
+        .floor()
+        .max(150.0);
     let pad_x = f32::from(m.card_pad).max(16.0);
     let pad_y = f32::from(m.card_pad).max(14.0);
     let text_w = (card_w - pad_x * 2.0).max(100.0);
@@ -801,61 +894,71 @@ pub fn principle_card_row(
         .fold(0.0_f32, f32::max);
     let card_h = (max_content_h + pad_y * 2.0).max(116.0).ceil();
 
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        for (&(title, desc), (tg, dg)) in cards.iter().zip(layouts.iter()) {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::hover());
-            resp.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Panel, true, format!("原则卡片：{title}"))
-            });
-
-            if ui.is_rect_visible(rect) {
-                ui.painter().rect(
-                    rect,
-                    CornerRadius::same(8),
-                    p.bg_surface,
-                    Stroke::new(1.0, p.border_subtle),
-                    StrokeKind::Inside,
-                );
-
-                let block_h = tg.size().y + title_gap + dg.size().y;
-                let top_y = (rect.center().y - block_h * 0.5).round();
-                let left_x = (rect.left() + pad_x).round();
-                let text_rect = egui::Rect::from_min_size(
-                    egui::pos2(left_x, top_y),
-                    Vec2::new(text_w, (rect.bottom() - top_y - 4.0).max(block_h)),
-                );
-                ui.scope_builder(
-                    egui::UiBuilder::new()
-                        .max_rect(text_rect)
-                        .layout(egui::Layout::top_down(egui::Align::LEFT)),
-                    |ui| {
-                        ui.set_width(text_w);
-                        ui.set_max_width(text_w);
-                        ui.spacing_mut().item_spacing.y = title_gap;
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(title)
-                                    .size(m.h3_size)
-                                    .color(p.text_primary),
-                            )
-                            .selectable(true)
-                            .wrap(),
-                        );
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(desc)
-                                    .size(m.secondary_size)
-                                    .color(p.text_secondary),
-                            )
-                            .selectable(true)
-                            .wrap(),
-                        );
-                    },
-                );
-            }
+    for (row_idx, row_start) in (0..cards.len()).step_by(cols).enumerate() {
+        if row_idx > 0 {
+            ui.add_space(gap);
         }
-    });
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for offset in 0..cols {
+                let idx = row_start + offset;
+                if idx >= cards.len() {
+                    break;
+                }
+                let (title, desc) = cards[idx];
+                let (ref tg, ref dg) = layouts[idx];
+                let (rect, resp) =
+                    ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::hover());
+                resp.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Panel, true, format!("原则卡片：{title}"))
+                });
+
+                if ui.is_rect_visible(rect) {
+                    ui.painter().rect(
+                        rect,
+                        CornerRadius::same(8),
+                        p.bg_surface,
+                        Stroke::new(1.0, p.border_subtle),
+                        StrokeKind::Inside,
+                    );
+
+                    let block_h = tg.size().y + title_gap + dg.size().y;
+                    let top_y = (rect.center().y - block_h * 0.5).round();
+                    let left_x = (rect.left() + pad_x).round();
+                    let text_rect = egui::Rect::from_min_size(
+                        egui::pos2(left_x, top_y),
+                        Vec2::new(text_w, (rect.bottom() - top_y - 4.0).max(block_h)),
+                    );
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(text_rect)
+                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                    );
+                    child.set_width(text_w);
+                    child.set_max_width(text_w);
+                    child.spacing_mut().item_spacing.y = title_gap;
+                    child.add(
+                        egui::Label::new(
+                            egui::RichText::new(title)
+                                .size(m.h3_size)
+                                .color(p.text_primary),
+                        )
+                        .selectable(true)
+                        .wrap(),
+                    );
+                    child.add(
+                        egui::Label::new(
+                            egui::RichText::new(desc)
+                                .size(m.secondary_size)
+                                .color(p.text_secondary),
+                        )
+                        .selectable(true)
+                        .wrap(),
+                    );
+                }
+            }
+        });
+    }
 }
 
 /// 自绘现代下拉选择控件（等高对齐按钮、抗锯齿矢量箭头、深浅色自适应弹层、AccessKit 完整语义）
@@ -870,44 +973,64 @@ pub fn styled_dropdown(
     width: f32,
 ) -> bool {
     let mut changed = false;
+    let enabled = ui.is_enabled();
     let popup_id = ui.make_persistent_id(id_salt);
-    let is_open = ui.ctx().memory(|mem| mem.data.get_temp::<bool>(popup_id)).unwrap_or(false);
+    let is_open = enabled
+        && ui
+            .ctx()
+            .memory(|mem| mem.data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
 
     let desired = Vec2::new(width.max(96.0), m.control_height);
-    let (rect, response) = ui.allocate_exact_size(desired, Sense::click());
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(desired, sense);
     response.widget_info(|| {
         WidgetInfo::labeled(
             WidgetType::ComboBox,
-            true,
+            enabled,
             format!("{accessible_label}：{}", *current),
         )
     });
 
-    if response.clicked() {
+    if enabled && response.clicked() {
         ui.ctx()
             .memory_mut(|mem| mem.data.insert_temp(popup_id, !is_open));
     }
 
-    let now_open = ui.ctx().memory(|mem| mem.data.get_temp::<bool>(popup_id)).unwrap_or(false);
+    let now_open = enabled
+        && ui
+            .ctx()
+            .memory(|mem| mem.data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
 
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let pressed = response.is_pointer_button_down_on();
-        let focused = response.has_focus();
+        let hovered = enabled && response.hovered();
+        let pressed = enabled && response.is_pointer_button_down_on();
+        let focused = enabled && response.has_focus();
 
-        let bg = if pressed {
-            p.bg_pressed
-        } else if hovered || now_open {
-            p.bg_hover
+        let (bg, border, fg, arrow_color) = if !enabled {
+            (p.bg_disabled, p.border_subtle, p.text_disabled, p.text_disabled)
         } else {
-            p.bg_control
-        };
-        let border = if now_open {
-            p.accent_primary
-        } else if hovered || pressed {
-            p.border_strong
-        } else {
-            p.border_control
+            let bg = if pressed {
+                p.bg_pressed
+            } else if hovered || now_open {
+                p.bg_hover
+            } else {
+                p.bg_control
+            };
+            let border = if now_open {
+                p.accent_primary
+            } else if hovered || pressed {
+                p.border_strong
+            } else {
+                p.border_control
+            };
+            let arrow = if now_open {
+                p.accent_primary
+            } else {
+                p.text_secondary
+            };
+            (bg, border, p.text_primary, arrow)
         };
 
         let painter = ui.painter();
@@ -936,7 +1059,7 @@ pub fn styled_dropdown(
             painter,
             current,
             FontId::proportional(m.body_size),
-            p.text_primary,
+            fg,
             text_max_w,
         );
         let text_y = rect.center().y - galley.size().y * 0.5;
@@ -946,19 +1069,12 @@ pub fn styled_dropdown(
         );
         painter
             .with_clip_rect(text_clip)
-            .galley(egui::pos2(text_left, text_y), galley, p.text_primary);
+            .galley(egui::pos2(text_left, text_y), galley, fg);
 
         // 右侧精致抗锯齿矢量折线箭头（展开时翻转朝上）
         let cx = rect.right() - 15.0;
         let cy = rect.center().y;
-        let arrow_stroke = Stroke::new(
-            1.5,
-            if now_open {
-                p.accent_primary
-            } else {
-                p.text_secondary
-            },
-        );
+        let arrow_stroke = Stroke::new(1.5, arrow_color);
         if now_open {
             painter.line_segment([egui::pos2(cx - 4.0, cy + 2.0), egui::pos2(cx, cy - 2.0)], arrow_stroke);
             painter.line_segment([egui::pos2(cx, cy - 2.0), egui::pos2(cx + 4.0, cy + 2.0)], arrow_stroke);
@@ -968,7 +1084,9 @@ pub fn styled_dropdown(
         }
     }
 
-    let _ = response.clone().on_hover_cursor(egui::CursorIcon::PointingHand);
+    if enabled {
+        let _ = response.clone().on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
 
     if now_open {
         let mut close_popup = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
@@ -1004,7 +1122,9 @@ pub fn styled_dropdown(
 
                                 if ui.is_rect_visible(r) {
                                     let pnt = ui.painter();
-                                    let row_bg = if is_sel {
+                                    let row_bg = if resp.is_pointer_button_down_on() {
+                                        p.bg_pressed
+                                    } else if is_sel {
                                         p.bg_selected
                                     } else if resp.hovered() {
                                         p.bg_hover
@@ -1012,6 +1132,14 @@ pub fn styled_dropdown(
                                         Color32::TRANSPARENT
                                     };
                                     pnt.rect_filled(r, CornerRadius::same(4), row_bg);
+                                    if resp.has_focus() {
+                                        pnt.rect_stroke(
+                                            r.expand(1.5),
+                                            CornerRadius::same(5),
+                                            Stroke::new(2.0, p.focus_ring),
+                                            StrokeKind::Outside,
+                                        );
+                                    }
                                     if is_sel {
                                         let ind_h = 14.0;
                                         let ind_rect = egui::Rect::from_min_size(
@@ -1064,7 +1192,7 @@ pub fn styled_dropdown(
     changed
 }
 
-/// 自绘高对比度滑动条（明确底轨 + 强调色已选导轨 + 圆形滑钮 + 键盘微调 + AccessKit Slider 语义）
+/// 自绘高对比度滑动条（完整五态 + 明确底轨 + 强调色已选导轨 + 圆形滑钮 + 键盘微调 + AccessKit Slider 语义）
 pub fn styled_slider(
     ui: &mut Ui,
     p: Palette,
@@ -1075,16 +1203,22 @@ pub fn styled_slider(
     width: f32,
     accessible_label: &str,
 ) -> Response {
+    let enabled = ui.is_enabled();
     let height = 28.0;
     let thumb_r = 8.5_f32;
-    let (rect, mut response) =
-        ui.allocate_exact_size(Vec2::new(width.max(120.0), height), Sense::click_and_drag());
+    let sense = if enabled {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
+    };
+    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(width.max(120.0), height), sense);
 
     let rail_left = rect.left() + thumb_r + 2.0;
     let rail_right = (rect.right() - thumb_r - 2.0).max(rail_left + 1.0);
     let rail_w = rail_right - rail_left;
 
-    if (response.dragged() || response.clicked())
+    if enabled
+        && (response.dragged() || response.clicked())
         && let Some(pos) = response.interact_pointer_pos()
     {
         let t = ((pos.x - rail_left) / rail_w).clamp(0.0, 1.0);
@@ -1101,7 +1235,7 @@ pub fn styled_slider(
         }
     }
 
-    if response.has_focus() {
+    if enabled && response.has_focus() {
         let delta = ui.ctx().input(|i| {
             if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowUp) {
                 step
@@ -1120,7 +1254,7 @@ pub fn styled_slider(
         }
     }
 
-    response.widget_info(|| WidgetInfo::slider(true, f64::from(*value), accessible_label));
+    response.widget_info(|| WidgetInfo::slider(enabled, f64::from(*value), accessible_label));
 
     if ui.is_rect_visible(rect) {
         let t = ((*value - min) / (max - min).max(f32::EPSILON)).clamp(0.0, 1.0);
@@ -1136,43 +1270,51 @@ pub fn styled_slider(
             egui::pos2(thumb_x.max(rail_left + 3.0), cy + rail_h * 0.5),
         );
 
+        let hovered = enabled && response.hovered();
+        let pressed = enabled && (response.dragged() || response.is_pointer_button_down_on());
+        let focused = enabled && response.has_focus();
+
+        let (rail_fill, rail_border, active_fill, thumb_ring) = if !enabled {
+            (p.bg_disabled, p.border_subtle, p.border_control, p.text_disabled)
+        } else if pressed {
+            (p.bg_control_alt, p.border_strong, p.accent_pressed, p.accent_pressed)
+        } else if hovered {
+            (p.bg_control_alt, p.border_strong, p.accent_hover, p.accent_hover)
+        } else {
+            (p.bg_control_alt, p.border_control, p.accent_primary, p.accent_primary)
+        };
+
         let painter = ui.painter();
-        // 明确高对比度未激活导轨（浅/深色下均与卡片白/深底明显区分）
         painter.rect(
             rail_rect,
             CornerRadius::same(3),
-            p.bg_control_alt,
-            Stroke::new(1.0, p.border_control),
+            rail_fill,
+            Stroke::new(1.0, rail_border),
             StrokeKind::Inside,
         );
-        // 左侧已激活导轨（品牌强调色）
-        painter.rect_filled(active_rect, CornerRadius::same(3), p.accent_primary);
+        painter.rect_filled(active_rect, CornerRadius::same(3), active_fill);
 
-        let hovered = response.hovered() || response.dragged();
-        let draw_r = if hovered { thumb_r + 1.0 } else { thumb_r };
+        let draw_r = if pressed || hovered { thumb_r + 1.0 } else { thumb_r };
         let thumb_center = egui::pos2(thumb_x, cy);
-        if response.has_focus() {
+        if focused {
             painter.circle_stroke(thumb_center, draw_r + 3.0, Stroke::new(2.0, p.focus_ring));
         }
         painter.circle(
             thumb_center,
             draw_r,
-            p.bg_surface,
-            Stroke::new(
-                2.2,
-                if hovered {
-                    p.accent_hover
-                } else {
-                    p.accent_primary
-                },
-            ),
+            if enabled { p.bg_surface } else { p.bg_disabled },
+            Stroke::new(2.2, thumb_ring),
         );
     }
 
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
-/// 等宽等高的 2×2 状态反馈横幅网格（先统一预排测高，四个框尺寸完全一致，左对齐且垂直居中）
+/// 等宽等高的状态反馈横幅网格（宽屏 2×2，窄窗自动降为 1 列，防溢出且尺寸完全一致）
 pub fn status_banner_grid(
     ui: &mut Ui,
     p: Palette,
@@ -1185,7 +1327,12 @@ pub fn status_banner_grid(
     }
     let gap_x = 12.0;
     let gap_y = 10.0;
-    let bw = ((total_width - gap_x) * 0.5).floor().max(220.0);
+    let cols = if total_width >= 460.0 { 2 } else { 1 };
+    let bw = if cols == 2 {
+        ((total_width - gap_x) * 0.5).floor().max(180.0)
+    } else {
+        total_width.floor().max(180.0)
+    };
     let pad_x = 14.0;
     let pad_y = 12.0;
     let title_gap = 5.0;
@@ -1220,13 +1367,13 @@ pub fn status_banner_grid(
         .fold(0.0_f32, f32::max);
     let box_h = (max_content_h + pad_y * 2.0).max(74.0).ceil();
 
-    for row_idx in (0..items.len()).step_by(2) {
+    for row_idx in (0..items.len()).step_by(cols) {
         if row_idx > 0 {
             ui.add_space(gap_y);
         }
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap_x;
-            for offset in 0..2 {
+            for offset in 0..cols {
                 let idx = row_idx + offset;
                 if idx >= items.len() {
                     break;
@@ -1255,31 +1402,29 @@ pub fn status_banner_grid(
                         egui::pos2(left_x, top_y),
                         Vec2::new(text_w, (rect.bottom() - top_y - 4.0).max(block_h)),
                     );
-                    ui.scope_builder(
+                    let mut child = ui.new_child(
                         egui::UiBuilder::new()
                             .max_rect(text_rect)
                             .layout(egui::Layout::top_down(egui::Align::LEFT)),
-                        |ui| {
-                            ui.set_width(text_w);
-                            ui.set_max_width(text_w);
-                            ui.spacing_mut().item_spacing.y = title_gap;
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(title).size(m.body_size).color(fg),
-                                )
-                                .selectable(true)
-                                .wrap(),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(desc)
-                                        .size(m.secondary_size)
-                                        .color(p.text_primary),
-                                )
-                                .selectable(true)
-                                .wrap(),
-                            );
-                        },
+                    );
+                    child.set_width(text_w);
+                    child.set_max_width(text_w);
+                    child.spacing_mut().item_spacing.y = title_gap;
+                    child.add(
+                        egui::Label::new(
+                            egui::RichText::new(title).size(m.body_size).color(fg),
+                        )
+                        .selectable(true)
+                        .wrap(),
+                    );
+                    child.add(
+                        egui::Label::new(
+                            egui::RichText::new(desc)
+                                .size(m.secondary_size)
+                                .color(p.text_primary),
+                        )
+                        .selectable(true)
+                        .wrap(),
                     );
                 }
             }
@@ -1317,6 +1462,28 @@ pub fn equal_height_card_pair(
         .unwrap_or_default();
 
     let pad = f32::from(m.card_pad);
+    let avail_w = ui.available_width();
+
+    // 窄窗降级：当剩余宽度不足以并排容纳双栏时自动改为纵向全宽堆叠，杜绝 820×540 最小窗口溢出
+    if avail_w + 1.0 < left_w + right_w + gap {
+        let full_inner = (avail_w - pad * 2.0).max(180.0);
+        surface_card(ui, p, m, |ui| {
+            ui.set_width(full_inner);
+            ui.set_max_width(full_inner);
+            add_left(ui);
+        });
+        ui.add_space(m.section_gap);
+        surface_card(ui, p, m, |ui| {
+            ui.set_width(full_inner);
+            ui.set_max_width(full_inner);
+            add_right_body(ui);
+            if let Some(footer_fn) = add_right_footer {
+                footer_fn(ui);
+            }
+        });
+        return;
+    }
+
     let left_inner_w = (left_w - pad * 2.0).max(160.0);
     let right_inner_w = (right_w - pad * 2.0).max(160.0);
 

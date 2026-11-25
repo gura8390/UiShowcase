@@ -176,10 +176,25 @@ try {
     }
     $refW = $pCards[0].Current.BoundingRectangle.Width
     $refH = $pCards[0].Current.BoundingRectangle.Height
-    foreach ($pc in $pCards) {
-        $br = $pc.Current.BoundingRectangle
+    $refTop = $pCards[0].Current.BoundingRectangle.Top
+    $winRightFull = $win.Current.BoundingRectangle.Right
+    for ($i = 0; $i -lt $pCards.Count; $i++) {
+        $br = $pCards[$i].Current.BoundingRectangle
         if ([math]::Abs($br.Width - $refW) -gt 2 -or [math]::Abs($br.Height - $refH) -gt 2) {
             throw "四张核心原则卡片尺寸不一致（参考=${refW}x${refH}，实际=$($br.Width)x$($br.Height)）"
+        }
+        if ([math]::Abs($br.Top - $refTop) -gt 2) {
+            throw "四张核心原则卡片未处于同一水平行（第 $i 张 Top=$($br.Top)，参考 Top=$refTop）"
+        }
+        if ($br.Right -gt ($winRightFull + 2)) {
+            throw "第 $i 张核心原则卡片越出窗口右边界（$($br.Right) > $winRightFull）"
+        }
+        if ($i -gt 0) {
+            $prevR = $pCards[$i - 1].Current.BoundingRectangle.Right
+            $gapPx = $br.Left - $prevR
+            if ($gapPx -lt 4 -or $gapPx -gt 40) {
+                throw "第 $($i - 1) 与第 $i 张原则卡片发生重叠或间距异常（gap=${gapPx}px，前右=$prevR，后左=$($br.Left)）"
+            }
         }
     }
     $sw1 = Find-ByNameContains $win "画布底色" 3000
@@ -325,8 +340,20 @@ try {
     if ($toggleA.Current.BoundingRectangle.Bottom -gt ($toggleB.Current.BoundingRectangle.Top + 4)) {
         throw "控件页两个开关未纵向堆叠"
     }
-    if ($bnInfo.Current.BoundingRectangle.Right -ge $bnOk.Current.BoundingRectangle.Left) {
-        throw "状态反馈「信息」与「成功」横幅发生横向重叠"
+    if ($bnInfo.Current.BoundingRectangle.Right -ge $bnOk.Current.BoundingRectangle.Left -or
+        ($bnOk.Current.BoundingRectangle.Left - $bnInfo.Current.BoundingRectangle.Right) -gt 40) {
+        throw "状态反馈「信息」与「成功」横幅重叠或间距异常（infoRight=$($bnInfo.Current.BoundingRectangle.Right), okLeft=$($bnOk.Current.BoundingRectangle.Left)）"
+    }
+    if ($bnWarn.Current.BoundingRectangle.Right -ge $bnErr.Current.BoundingRectangle.Left -or
+        ($bnErr.Current.BoundingRectangle.Left - $bnWarn.Current.BoundingRectangle.Right) -gt 40) {
+        throw "状态反馈「警告」与「错误」横幅重叠或间距异常（warnRight=$($bnWarn.Current.BoundingRectangle.Right), errLeft=$($bnErr.Current.BoundingRectangle.Left)）"
+    }
+    if ([math]::Abs($bnInfo.Current.BoundingRectangle.Top - $bnOk.Current.BoundingRectangle.Top) -gt 2 -or
+        [math]::Abs($bnWarn.Current.BoundingRectangle.Top - $bnErr.Current.BoundingRectangle.Top) -gt 2) {
+        throw "状态反馈四件套同行两框未顶部对齐"
+    }
+    if ($bnOk.Current.BoundingRectangle.Right -gt ($win.Current.BoundingRectangle.Right + 2)) {
+        throw "状态反馈「成功」横幅越出窗口右边界"
     }
     if ($bnInfo.Current.BoundingRectangle.Bottom -gt ($bnWarn.Current.BoundingRectangle.Top + 4)) {
         throw "状态反馈第一行与第二行未纵向分开"
@@ -384,6 +411,46 @@ try {
         throw "关于页未显示 OpenGL (glow) 渲染后端信息"
     }
     Add-Pass "关于与环境页 DPI/glow 后端读数验收通过"
+
+    # 9.5 最小窗口（820×540 逻辑尺寸）窄窗响应式零溢出核验
+    $tfObj = $null
+    if ($win.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern, [ref]$tfObj)) {
+        # 切换回标准密度便于检验最宽侧边栏（232pt）下的最小窗口极限布局
+        Trigger-Control (Find-ByName $win "快速切换密度：标准" 3000) "切换标准密度"
+        Start-Sleep -Milliseconds 200
+        $origW = $win.Current.BoundingRectangle.Width
+        $origH = $win.Current.BoundingRectangle.Height
+        # 按当前窗口缩放估算出 820×540 物理像素（150% 下约 1230×810，100% 下 820×540）
+        $scale = if ($stdH -gt 0) { $stdH / 40.0 } else { 1.0 }
+        $minPhysW = [math]::Round(820.0 * $scale)
+        $minPhysH = [math]::Round(540.0 * $scale)
+        $tfObj.Resize($minPhysW, $minPhysH)
+        Start-Sleep -Milliseconds 350
+        $wRight = $win.Current.BoundingRectangle.Right
+
+        foreach ($navCheck in @(
+            @{ Nav = "导航：总览与色板"; Probe = "原则卡片：04 · 居中与无障碍" },
+            @{ Nav = "导航：典型工具界面"; Probe = "搜索核查记录" },
+            @{ Nav = "导航：控件与交互态"; Probe = "并发扫描阈值" },
+            @{ Nav = "导航：主题与设置"; Probe = "强调色：琥珀金" }
+        )) {
+            Trigger-Control (Find-ByName $win $navCheck.Nav 3000) $navCheck.Nav
+            Start-Sleep -Milliseconds 250
+            $probeEl = Find-ByName $win $navCheck.Probe 3000
+            if ($null -eq $probeEl) {
+                throw "最小窗口下未找到节点「$($navCheck.Probe)」"
+            }
+            if ($probeEl.Current.BoundingRectangle.Right -gt ($wRight + 4)) {
+                throw "最小窗口（820×540）下「$($navCheck.Probe)」右边界 ($($probeEl.Current.BoundingRectangle.Right)) 超出窗口右边界 ($wRight)"
+            }
+        }
+        $tfObj.Resize($origW, $origH)
+        Start-Sleep -Milliseconds 250
+        # 恢复紧凑密度以保持后续持久化验收一致
+        Trigger-Control (Find-ByName $win "快速切换密度：紧凑" 3000) "恢复紧凑密度"
+        Start-Sleep -Milliseconds 250
+        Add-Pass "最小窗口（820×540）全站四页面窄窗响应式零横向溢出验收通过"
+    }
 
     # 10. 正常退出应用
     Trigger-Control (Find-ByName $win "退出应用") "退出应用"

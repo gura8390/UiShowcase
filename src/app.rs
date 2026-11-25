@@ -462,83 +462,148 @@ impl ShowcaseApp {
                 );
 
                 let avail_w = ui.available_width();
-                // 为右侧三组等高分段开关预留固定空间 + 至少 28pt 呼吸留白，防止副标题与按钮贴近
-                let left_max_w = (avail_w - 388.0).max(180.0);
+                // 宽屏并排（预留右侧三组等高分段开关 + ≥28pt 安全留白）；窄窗（如 820px 最小窗口）自动折为两行防溢出
+                if avail_w >= 640.0 {
+                    let left_max_w = (avail_w - 396.0).max(200.0);
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(left_max_w, 0.0),
+                            egui::Layout::top_down(egui::Align::LEFT),
+                            |ui| {
+                                ui.set_width(left_max_w);
+                                ui.set_max_width(left_max_w);
+                                ui.spacing_mut().item_spacing.y = 4.0;
+                                ui.label(
+                                    RichText::new(self.page.title())
+                                        .size(m.h1_size)
+                                        .color(p.text_primary),
+                                );
+                                ui.label(
+                                    RichText::new(self.page.subtitle())
+                                        .size(m.secondary_size)
+                                        .color(p.text_secondary),
+                                );
+                            },
+                        );
 
-                ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(left_max_w, 0.0),
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| {
-                            ui.set_width(left_max_w);
-                            ui.set_max_width(left_max_w);
-                            ui.spacing_mut().item_spacing.y = 4.0;
-                            ui.label(
-                                RichText::new(self.page.title())
-                                    .size(m.h1_size)
-                                    .color(p.text_primary),
-                            );
-                            ui.label(
-                                RichText::new(self.page.subtitle())
-                                    .size(m.secondary_size)
-                                    .color(p.text_secondary),
-                            );
-                        },
-                    );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut is_dark = p.dark;
+                            if segment_bar(
+                                ui,
+                                p,
+                                m,
+                                &mut is_dark,
+                                &[(false, "浅色"), (true, "深色")],
+                                "快速切换主题",
+                            ) {
+                                self.settings.theme_mode = if is_dark {
+                                    ThemeMode::Dark
+                                } else {
+                                    ThemeMode::Light
+                                };
+                                self.apply_visuals_and_save(ctx, "主题模式已更新", false);
+                            }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mut is_dark = p.dark;
-                        if segment_bar(
-                            ui,
-                            p,
-                            m,
-                            &mut is_dark,
-                            &[(false, "浅色"), (true, "深色")],
-                            "快速切换主题",
-                        ) {
-                            self.settings.theme_mode = if is_dark {
-                                ThemeMode::Dark
-                            } else {
-                                ThemeMode::Light
-                            };
-                            self.apply_visuals_and_save(ctx, "主题模式已更新", false);
-                        }
+                            ui.add_space(8.0);
+                            let mut density = self.settings.density_mode;
+                            if segment_bar(
+                                ui,
+                                p,
+                                m,
+                                &mut density,
+                                &[
+                                    (DensityMode::Standard, "标准"),
+                                    (DensityMode::Compact, "紧凑"),
+                                ],
+                                "快速切换密度",
+                            ) {
+                                self.settings.density_mode = density;
+                                self.apply_visuals_and_save(ctx, "界面密度已更新", false);
+                            }
 
-                        ui.add_space(8.0);
-                        let mut density = self.settings.density_mode;
-                        if segment_bar(
-                            ui,
-                            p,
-                            m,
-                            &mut density,
-                            &[
-                                (DensityMode::Standard, "标准"),
-                                (DensityMode::Compact, "紧凑"),
-                            ],
-                            "快速切换密度",
-                        ) {
-                            self.settings.density_mode = density;
-                            self.apply_visuals_and_save(ctx, "界面密度已更新", false);
-                        }
-
-                        ui.add_space(8.0);
-                        let mut font = self.settings.font_choice;
-                        if segment_bar(
-                            ui,
-                            p,
-                            m,
-                            &mut font,
-                            &[
-                                (FontChoice::FzGwKai, "楷体"),
-                                (FontChoice::MicrosoftYaHei, "雅黑"),
-                            ],
-                            "快速切换字体",
-                        ) {
-                            self.settings.font_choice = font;
-                            self.apply_visuals_and_save(ctx, "界面字体已切换", true);
-                        }
+                            ui.add_space(8.0);
+                            let mut font = self.settings.font_choice;
+                            if segment_bar(
+                                ui,
+                                p,
+                                m,
+                                &mut font,
+                                &[
+                                    (FontChoice::FzGwKai, "楷体"),
+                                    (FontChoice::MicrosoftYaHei, "雅黑"),
+                                ],
+                                "快速切换字体",
+                            ) {
+                                self.settings.font_choice = font;
+                                self.apply_visuals_and_save(ctx, "界面字体已切换", true);
+                            }
+                        });
                     });
-                });
+                } else {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.label(
+                            RichText::new(self.page.title())
+                                .size(m.h1_size)
+                                .color(p.text_primary),
+                        );
+                        ui.label(
+                            RichText::new(self.page.subtitle())
+                                .size(m.secondary_size)
+                                .color(p.text_secondary),
+                        );
+                        ui.add_space(8.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                            let mut font = self.settings.font_choice;
+                            if segment_bar(
+                                ui,
+                                p,
+                                m,
+                                &mut font,
+                                &[
+                                    (FontChoice::FzGwKai, "楷体"),
+                                    (FontChoice::MicrosoftYaHei, "雅黑"),
+                                ],
+                                "快速切换字体",
+                            ) {
+                                self.settings.font_choice = font;
+                                self.apply_visuals_and_save(ctx, "界面字体已切换", true);
+                            }
+                            let mut density = self.settings.density_mode;
+                            if segment_bar(
+                                ui,
+                                p,
+                                m,
+                                &mut density,
+                                &[
+                                    (DensityMode::Standard, "标准"),
+                                    (DensityMode::Compact, "紧凑"),
+                                ],
+                                "快速切换密度",
+                            ) {
+                                self.settings.density_mode = density;
+                                self.apply_visuals_and_save(ctx, "界面密度已更新", false);
+                            }
+                            let mut is_dark = p.dark;
+                            if segment_bar(
+                                ui,
+                                p,
+                                m,
+                                &mut is_dark,
+                                &[(false, "浅色"), (true, "深色")],
+                                "快速切换主题",
+                            ) {
+                                self.settings.theme_mode = if is_dark {
+                                    ThemeMode::Dark
+                                } else {
+                                    ThemeMode::Light
+                                };
+                                self.apply_visuals_and_save(ctx, "主题模式已更新", false);
+                            }
+                        });
+                    });
+                }
             });
     }
 
@@ -739,9 +804,9 @@ impl ShowcaseApp {
 
         ui.add_space(m.section_gap);
 
-        // 排版层级 + 数据对齐对照（严格双列等高齐平，上下边框完全对齐）
+        // 排版层级 + 数据对齐对照（严格双列等高齐平；窄窗自动堆叠防溢出）
         let pair_gap = 14.0;
-        let half_w = ((ui.available_width() - pair_gap) / 2.0).floor().max(260.0);
+        let half_w = ((ui.available_width() - pair_gap) / 2.0).floor().max(290.0);
         let font_choice = self.settings.font_choice;
         equal_height_card_pair(
             ui,
@@ -811,29 +876,34 @@ impl ShowcaseApp {
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(egui::Margin::same(12))
                     .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                RichText::new("编号       大小        校验摘要    更新时间")
-                                    .monospace()
-                                    .size(m.secondary_size)
-                                    .color(p.text_secondary),
-                            );
-                            ui.separator();
-                            for line in [
-                                "DOC-001      1.42 MB   A8F3-91C2   2026-11-24 09:18",
-                                "DOC-002     48.60 KB   4C19-DE07   2026-11-24 11:04",
-                                "DOC-003     12.15 KB   7B2E-04FA   2026-11-22 17:40",
-                                "DOC-004     18.75 MB   F05D-88B1   2026-11-20 14:22",
-                            ] {
-                                ui.label(
-                                    RichText::new(line)
-                                        .monospace()
-                                        .size(m.secondary_size)
-                                        .color(p.text_primary),
-                                );
-                            }
-                        });
+                        egui::ScrollArea::horizontal()
+                            .id_salt("overview_mono_scroll")
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.label(
+                                        RichText::new("编号       大小        校验摘要    更新时间")
+                                            .monospace()
+                                            .size(m.secondary_size)
+                                            .color(p.text_secondary),
+                                    );
+                                    ui.separator();
+                                    for line in [
+                                        "DOC-001      1.42 MB   A8F3-91C2   2026-11-24 09:18",
+                                        "DOC-002     48.60 KB   4C19-DE07   2026-11-24 11:04",
+                                        "DOC-003     12.15 KB   7B2E-04FA   2026-11-22 17:40",
+                                        "DOC-004     18.75 MB   F05D-88B1   2026-11-20 14:22",
+                                    ] {
+                                        ui.label(
+                                            RichText::new(line)
+                                                .monospace()
+                                                .size(m.secondary_size)
+                                                .color(p.text_primary),
+                                        );
+                                    }
+                                });
+                            });
                     });
             },
             None::<fn(&mut egui::Ui)>,
@@ -841,28 +911,30 @@ impl ShowcaseApp {
     }
 
     fn render_workbench(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, p: Palette, m: DensityMetrics) {
-        // 顶部工具栏（同一操作区最多 1 个主按钮）
+        // 顶部工具栏（同一操作区最多 1 个主按钮；窄窗自动拆分为操作行 + 筛选搜索行，杜绝 820px 溢出）
         surface_card(ui, p, m, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
+            let bar_w = ui.available_width();
+            ui.set_width(bar_w);
+            let mut do_reset = false;
+            let mut do_start_scan = false;
+            let mut do_cancel_scan = false;
+            let mut do_toggle_empty = false;
+
+            let is_scanning = self.scanning;
+            let is_empty = self.simulate_empty;
+            let mut render_actions = |ui: &mut egui::Ui| {
                 if styled_button(
                     ui,
                     p,
                     m,
                     "开始模拟核查",
                     ButtonKind::Primary,
-                    !self.scanning,
+                    !is_scanning,
                     false,
                 )
                 .clicked()
                 {
-                    self.simulate_empty = false;
-                    self.scanning = true;
-                    self.scan_progress = 0.0;
-                    self.scan_last_tick = Some(Instant::now());
-                    self.scan_status_text = "正在核查文件哈希（0%）…".to_owned();
-                    self.status_message = "模拟后台核查已启动，界面保持可交互".to_owned();
-                    ctx.request_repaint_after(Duration::from_millis(160));
+                    do_start_scan = true;
                 }
 
                 if styled_button(
@@ -871,18 +943,15 @@ impl ShowcaseApp {
                     m,
                     "取消任务",
                     ButtonKind::Secondary,
-                    self.scanning,
+                    is_scanning,
                     false,
                 )
                 .clicked()
                 {
-                    self.scanning = false;
-                    self.scan_status_text =
-                        format!("已在 {:.0}% 处取消", self.scan_progress * 100.0);
-                    self.status_message = "已取消模拟核查任务".to_owned();
+                    do_cancel_scan = true;
                 }
 
-                let empty_btn_label = if self.simulate_empty {
+                let empty_btn_label = if is_empty {
                     "恢复示例列表"
                 } else {
                     "预览空状态"
@@ -898,40 +967,50 @@ impl ShowcaseApp {
                 )
                 .clicked()
                 {
-                    self.simulate_empty = !self.simulate_empty;
-                    self.status_message = if self.simulate_empty {
-                        "已切换为空状态规范演示".to_owned()
-                    } else {
-                        "已恢复示例任务列表".to_owned()
-                    };
+                    do_toggle_empty = true;
                 }
 
                 if styled_button(ui, p, m, "重置数据", ButtonKind::Ghost, true, false).clicked() {
-                    self.tasks = initial_tasks();
-                    self.selected_task_id = self.tasks.first().map(|t| t.id.to_owned());
-                    self.search_query.clear();
-                    self.status_filter = "全部状态";
-                    self.simulate_empty = false;
-                    self.scanning = false;
-                    self.scan_progress = 0.0;
-                    self.scan_status_text.clear();
-                    self.status_message = "已重置典型工具界面演示数据".to_owned();
+                    do_reset = true;
                 }
+            };
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let search_edit = egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("搜索文件名、路径或编号…")
-                        .vertical_align(egui::Align::Center)
-                        .margin(egui::vec2(10.0, 0.0));
-                    let resp = ui.add_sized([210.0, m.control_height], search_edit);
-                    resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::TextEdit,
-                            true,
-                            "搜索核查记录",
-                        )
+            if bar_w >= 760.0 {
+                ui.horizontal(|ui| {
+                    render_actions(ui);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let search_edit = egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text("搜索文件名、路径或编号…")
+                            .vertical_align(egui::Align::Center)
+                            .margin(egui::vec2(10.0, 0.0));
+                        let resp = ui.add_sized([210.0, m.control_height], search_edit);
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::TextEdit,
+                                true,
+                                "搜索核查记录",
+                            )
+                        });
+
+                        styled_dropdown(
+                            ui,
+                            p,
+                            m,
+                            "workbench_status_filter",
+                            "按状态筛选",
+                            &mut self.status_filter,
+                            &["全部状态", "已通过", "需复核", "存在异常"],
+                            124.0,
+                        );
                     });
-
+                });
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    render_actions(ui);
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
                     styled_dropdown(
                         ui,
                         p,
@@ -942,8 +1021,55 @@ impl ShowcaseApp {
                         &["全部状态", "已通过", "需复核", "存在异常"],
                         124.0,
                     );
+                    let search_w = (bar_w - 136.0).max(140.0);
+                    let search_edit = egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("搜索文件名、路径或编号…")
+                        .vertical_align(egui::Align::Center)
+                        .margin(egui::vec2(10.0, 0.0));
+                    let resp = ui.add_sized([search_w, m.control_height], search_edit);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::TextEdit,
+                            true,
+                            "搜索核查记录",
+                        )
+                    });
                 });
-            });
+            }
+
+            if do_start_scan {
+                self.simulate_empty = false;
+                self.scanning = true;
+                self.scan_progress = 0.0;
+                self.scan_last_tick = Some(Instant::now());
+                self.scan_status_text = "正在核查文件哈希（0%）…".to_owned();
+                self.status_message = "模拟后台核查已启动，界面保持可交互".to_owned();
+                ctx.request_repaint_after(Duration::from_millis(160));
+            }
+            if do_cancel_scan {
+                self.scanning = false;
+                self.scan_status_text = format!("已在 {:.0}% 处取消", self.scan_progress * 100.0);
+                self.status_message = "已取消模拟核查任务".to_owned();
+            }
+            if do_toggle_empty {
+                self.simulate_empty = !self.simulate_empty;
+                self.status_message = if self.simulate_empty {
+                    "已切换为空状态规范演示".to_owned()
+                } else {
+                    "已恢复示例任务列表".to_owned()
+                };
+            }
+            if do_reset {
+                self.tasks = initial_tasks();
+                self.selected_task_id = self.tasks.first().map(|t| t.id.to_owned());
+                self.search_query.clear();
+                self.status_filter = "全部状态";
+                self.simulate_empty = false;
+                self.scanning = false;
+                self.scan_progress = 0.0;
+                self.scan_status_text.clear();
+                self.status_message = "已重置典型工具界面演示数据".to_owned();
+            }
         });
 
         ui.add_space(m.row_gap);
@@ -1312,10 +1438,10 @@ impl ShowcaseApp {
 
         ui.add_space(m.section_gap);
 
-        // 输入与内联错误 + 开关/分段/滑块（严格双列等高齐平，上下边框完全对齐）
+        // 输入与内联错误 + 开关/分段/滑块（严格双列等高齐平；窄窗自动堆叠防溢出）
         let pair_gap = 14.0;
-        let half_w = ((ui.available_width() - pair_gap) / 2.0).floor().max(280.0);
-        let half_inner_w = (half_w - f32::from(m.card_pad) * 2.0).max(220.0);
+        let avail_w = ui.available_width();
+        let half_w = ((avail_w - pair_gap) / 2.0).floor().max(295.0);
         let mut demo_path = self.demo_path.clone();
         let mut demo_combo = self.demo_combo;
         let mut demo_toggle_a = self.demo_toggle_a;
@@ -1334,6 +1460,7 @@ impl ShowcaseApp {
             half_w,
             pair_gap,
             |ui| {
+                let inner_w = ui.available_width();
                 ui.label(
                     RichText::new("输入框与内联校验错误")
                         .size(m.h2_size)
@@ -1354,7 +1481,7 @@ impl ShowcaseApp {
                 ui.add_space(4.0);
                 let edit = egui::TextEdit::singleline(&mut demo_path)
                     .hint_text(r"请输入绝对路径，例如 D:\Codex\UiShowcase")
-                    .desired_width(half_inner_w - 22.0)
+                    .desired_width((inner_w - 22.0).max(140.0))
                     .margin(egui::vec2(10.0, 8.0));
                 let resp = ui.add(edit);
                 resp.widget_info(|| {
@@ -1378,7 +1505,7 @@ impl ShowcaseApp {
                 }
 
                 ui.add_space(10.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if styled_button(
                         ui,
                         p,
@@ -1427,10 +1554,11 @@ impl ShowcaseApp {
                         "仅校验文件名与大小",
                         "快速跳过大文件",
                     ],
-                    half_inner_w,
+                    inner_w,
                 );
             },
             |ui| {
+                let inner_w = ui.available_width();
                 ui.label(
                     RichText::new("开关、分段选择与数值调节")
                         .size(m.h2_size)
@@ -1486,7 +1614,7 @@ impl ShowcaseApp {
 
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
-                    ui.set_width(half_inner_w);
+                    ui.set_width(inner_w);
                     ui.label(
                         RichText::new("并发扫描阈值")
                             .size(m.body_size)
@@ -1512,7 +1640,7 @@ impl ShowcaseApp {
                     10.0,
                     100.0,
                     5.0,
-                    half_inner_w,
+                    inner_w,
                     "并发扫描阈值",
                 );
             },
@@ -1573,23 +1701,58 @@ impl ShowcaseApp {
     }
 
     fn render_settings(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, p: Palette, m: DensityMetrics) {
+        fn responsive_setting_row(
+            ui: &mut egui::Ui,
+            p: Palette,
+            m: DensityMetrics,
+            title: &str,
+            desc: &str,
+            control_reserve_w: f32,
+            add_control: impl FnOnce(&mut egui::Ui),
+        ) {
+            let avail_w = ui.available_width();
+            if avail_w >= control_reserve_w + 260.0 {
+                let left_w = (avail_w - control_reserve_w - 20.0).max(200.0);
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_w, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_width(left_w);
+                            ui.set_max_width(left_w);
+                            ui.label(RichText::new(title).size(m.h3_size).color(p.text_primary));
+                            ui.label(RichText::new(desc).size(m.caption_size).color(p.text_muted));
+                        },
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add_control);
+                });
+            } else {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(title).size(m.h3_size).color(p.text_primary));
+                    ui.label(RichText::new(desc).size(m.caption_size).color(p.text_muted));
+                    ui.add_space(6.0);
+                    add_control(ui);
+                });
+            }
+        }
+
         surface_card(ui, p, m, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new("外观与字体").size(m.h2_size).color(p.text_primary));
             ui.add_space(14.0);
 
             // 字体切换
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("界面字体").size(m.h3_size).color(p.text_primary));
-                    ui.label(
-                        RichText::new("默认按 egui-ui.md 嵌入方正公文楷体，可一键切微软雅黑 UI 实时对比")
-                            .size(m.caption_size)
-                            .color(p.text_muted),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut font = self.settings.font_choice;
+            let mut next_font: Option<FontChoice> = None;
+            let cur_font = self.settings.font_choice;
+            responsive_setting_row(
+                ui,
+                p,
+                m,
+                "界面字体",
+                "默认按 egui-ui.md 嵌入方正公文楷体，可一键切微软雅黑 UI 实时对比",
+                260.0,
+                |ui| {
+                    let mut font = cur_font;
                     if segment_bar(
                         ui,
                         p,
@@ -1601,28 +1764,31 @@ impl ShowcaseApp {
                         ],
                         "界面字体",
                     ) {
-                        self.settings.font_choice = font;
-                        self.apply_visuals_and_save(ctx, "界面字体已切换", true);
+                        next_font = Some(font);
                     }
-                });
-            });
+                },
+            );
+            if let Some(font) = next_font {
+                self.settings.font_choice = font;
+                self.apply_visuals_and_save(ctx, "界面字体已切换", true);
+            }
 
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(10.0);
 
             // 主题模式
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("主题模式").size(m.h3_size).color(p.text_primary));
-                    ui.label(
-                        RichText::new("支持浅色、深色以及跟随 Windows 系统外观，标题栏联动变色")
-                            .size(m.caption_size)
-                            .color(p.text_muted),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut mode = self.settings.theme_mode;
+            let mut next_theme: Option<ThemeMode> = None;
+            let cur_theme = self.settings.theme_mode;
+            responsive_setting_row(
+                ui,
+                p,
+                m,
+                "主题模式",
+                "支持浅色、深色以及跟随 Windows 系统外观，标题栏联动变色",
+                270.0,
+                |ui| {
+                    let mut mode = cur_theme;
                     if segment_bar(
                         ui,
                         p,
@@ -1635,28 +1801,31 @@ impl ShowcaseApp {
                         ],
                         "主题模式",
                     ) {
-                        self.settings.theme_mode = mode;
-                        self.apply_visuals_and_save(ctx, "主题模式已更新", false);
+                        next_theme = Some(mode);
                     }
-                });
-            });
+                },
+            );
+            if let Some(mode) = next_theme {
+                self.settings.theme_mode = mode;
+                self.apply_visuals_and_save(ctx, "主题模式已更新", false);
+            }
 
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(10.0);
 
             // 强调色
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("品牌强调色").size(m.h3_size).color(p.text_primary));
-                    ui.label(
-                        RichText::new("仅替换 1 组强调色 Token，即可为不同工具建立清晰辨识度")
-                            .size(m.caption_size)
-                            .color(p.text_muted),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut ac = self.settings.accent_preset;
+            let mut next_accent: Option<AccentPreset> = None;
+            let cur_accent = self.settings.accent_preset;
+            responsive_setting_row(
+                ui,
+                p,
+                m,
+                "品牌强调色",
+                "仅替换 1 组强调色 Token，即可为不同工具建立清晰辨识度",
+                300.0,
+                |ui| {
+                    let mut ac = cur_accent;
                     if segment_bar(
                         ui,
                         p,
@@ -1670,28 +1839,31 @@ impl ShowcaseApp {
                         ],
                         "强调色",
                     ) {
-                        self.settings.accent_preset = ac;
-                        self.apply_visuals_and_save(ctx, "强调色方案已更新", false);
+                        next_accent = Some(ac);
                     }
-                });
-            });
+                },
+            );
+            if let Some(ac) = next_accent {
+                self.settings.accent_preset = ac;
+                self.apply_visuals_and_save(ctx, "强调色方案已更新", false);
+            }
 
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(10.0);
 
             // 界面密度
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("界面密度").size(m.h3_size).color(p.text_primary));
-                    ui.label(
-                        RichText::new("标准密度舒展从容；紧凑密度适合信息密集的列表与表格工具")
-                            .size(m.caption_size)
-                            .color(p.text_muted),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut dens = self.settings.density_mode;
+            let mut next_density: Option<DensityMode> = None;
+            let cur_density = self.settings.density_mode;
+            responsive_setting_row(
+                ui,
+                p,
+                m,
+                "界面密度",
+                "标准密度舒展从容；紧凑密度适合信息密集的列表与表格工具",
+                210.0,
+                |ui| {
+                    let mut dens = cur_density;
                     if segment_bar(
                         ui,
                         p,
@@ -1703,11 +1875,14 @@ impl ShowcaseApp {
                         ],
                         "界面密度",
                     ) {
-                        self.settings.density_mode = dens;
-                        self.apply_visuals_and_save(ctx, "界面密度已更新", false);
+                        next_density = Some(dens);
                     }
-                });
-            });
+                },
+            );
+            if let Some(dens) = next_density {
+                self.settings.density_mode = dens;
+                self.apply_visuals_and_save(ctx, "界面密度已更新", false);
+            }
         });
 
         ui.add_space(m.section_gap);

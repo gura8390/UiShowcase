@@ -18,7 +18,7 @@
   5. **关于与环境**：实时读取渲染后端、当前缩放倍率、`pixels_per_point`、视口逻辑/物理尺寸与系统托盘状态。
 - **统一的交互与无障碍规范**
   - **文本可选统一原则**：所有按钮、导航项、分段切换、开关、下拉框、滑动条与可点击列表行禁止拖选复制；其余全部展示性文字均支持鼠标拖选与 `Ctrl+C` 复制，选区配色满足高对比度；
-  - **全量 AccessKit -> Windows UI Automation 支持**：全部自绘控件显式注册中文无障碍名称、角色与状态，并配套 14 项自动化 UIA 与几何防重叠回归测试。
+  - **全量 AccessKit -> Windows UI Automation 支持**：全部自绘控件显式注册中文无障碍名称、角色与状态，并配套 15 项自动化 UIA、几何防重叠与最小窗口（`820×540`）回归测试。
 - **完整的 Windows 桌面工程闭环**
   - 自定义 `winit` 隐藏窗口事件循环包装器（`src/event_loop.rs`），窗口隐藏到托盘或最小化时零轮询空转且即时响应托盘「退出」「打开主窗口」与单实例唤醒；
   - Win32 原生托盘（`NOTIFYICON_VERSION_4` + `WS_EX_TOPMOST` + `WM_CONTEXTMENU` + KB135788），确保 Windows 11 右键托盘菜单始终位于任务栏前方；
@@ -44,7 +44,7 @@ UiShowcase/
 │   ├── system.rs                      # Win32 原生托盘、DWM 标题栏、系统主题与开机自启
 │   └── settings.rs                    # 本地 JSON 配置持久化与隔离环境支持
 ├── Tests/
-│   └── Verify-UiAutomation.ps1        # 14 项 UI Automation、几何防重叠与隐藏窗口托盘回归脚本
+│   └── Verify-UiAutomation.ps1        # 15 项 UI Automation、几何防重叠、最小窗口与托盘回归脚本
 └── 设计规范草案_澄明原生工具风.md       # 配套 Rust + egui 桌面 UI 设计与工程规范文档
 ```
 
@@ -64,7 +64,7 @@ UiShowcase/
 # 编译发布版
 cargo build --release
 
-# 运行 14 项 UI Automation、DPI、持久化、单实例与隐藏窗口托盘回归测试
+# 运行 15 项 UI Automation、DPI、持久化、单实例、最小窗口与隐藏窗口托盘回归测试
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tests\Verify-UiAutomation.ps1
 ```
 

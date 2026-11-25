@@ -23,11 +23,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
     DestroyWindow, DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, HWND_TOPMOST,
     IMAGE_ICON, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
-    RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetForegroundWindow, SetWindowPos, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, TranslateMessage, WM_APP, WM_CONTEXTMENU,
-    WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SPI_GETCLIENTAREAANIMATION,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos,
+    SystemParametersInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, TranslateMessage, WM_APP, WM_CONTEXTMENU, WM_LBUTTONDBLCLK,
+    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const APP_ICON_ID: usize = 1;
@@ -432,6 +432,20 @@ pub fn apply_titlebar_theme(hwnd_raw: isize, dark: bool) {
             std::mem::size_of::<i32>() as u32,
         );
     }
+}
+
+/// 读取 Windows 系统「在 Windows 中显示动画」无障碍设置；关闭时自动将微交互动效降级为 0ms
+pub fn prefers_reduced_motion() -> bool {
+    let mut enabled: i32 = 1;
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            (&mut enabled as *mut i32).cast(),
+            0,
+        )
+    };
+    ok != 0 && enabled == 0
 }
 
 pub fn is_windows_dark_theme() -> bool {

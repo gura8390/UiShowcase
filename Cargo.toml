@@ -1,6 +1,6 @@
 [package]
 name = "ui-showcase"
-version = "0.0.2-p1"
+version = "0.0.2-p2"
 edition = "2024"
 rust-version = "1.95"
 description = "澄明原生工具风 Rust + egui Windows 桌面 UI 设计规范交互展示应用"
