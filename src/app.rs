@@ -1871,7 +1871,7 @@ impl ShowcaseApp {
                     });
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("基于 Rust + egui (eframe + OpenGL glow 后端 + AccessKit 无障碍桥接) 重写，彻底告别 WPF 在高分屏下的 ClearType 降级与模糊问题，原生支持方正公文楷体与微软雅黑 UI 实时切换。")
+                        RichText::new("基于 Rust + egui（eframe + OpenGL glow 后端 + AccessKit 无障碍桥接）构建，按真实物理像素 1:1 光栅化高分字形图集，原生支持方正公文楷体与微软雅黑 UI 实时切换。")
                             .size(m.body_size)
                             .color(p.text_secondary),
                     );

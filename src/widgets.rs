@@ -373,25 +373,36 @@ pub fn toggle_switch(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// 语义状态徽章（视觉居中胶囊）
+/// 语义状态徽章（视觉居中胶囊；非交互展示标签允许拖选复制）
 pub fn status_badge(ui: &mut Ui, p: Palette, m: DensityMetrics, text: &str, kind: StatusKind) {
     let (fg, bg, bd) = status_colors(p, kind);
     let font_id = FontId::proportional(m.caption_size);
     let galley = ui
         .painter()
-        .layout_no_wrap(text.to_owned(), font_id.clone(), fg);
+        .layout_no_wrap(text.to_owned(), font_id, fg);
     let size = Vec2::new(galley.size().x + 18.0, 24.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        painter.rect(
+        ui.painter().rect(
             rect,
             CornerRadius::same(4),
             bg,
             Stroke::new(1.0, bd),
             StrokeKind::Inside,
         );
-        painter.text(rect.center(), Align2::CENTER_CENTER, text, font_id, fg);
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::centered_and_justified(
+                    egui::Direction::LeftToRight,
+                )),
+            |ui| {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(text).size(m.caption_size).color(fg))
+                        .selectable(true),
+                );
+            },
+        );
     }
 }
 
@@ -477,7 +488,7 @@ fn workbench_cols(rect: egui::Rect) -> WorkbenchCols {
     }
 }
 
-/// 核查记录列表四列表头（编号 / 文件名称与位置 / 大小 / 状态；字号高于正文以突出表头层级）
+/// 核查记录列表四列表头（编号 / 文件名称与位置 / 大小 / 状态；字号高于正文且允许拖选复制）
 pub fn workbench_task_header(ui: &mut Ui, p: Palette, m: DensityMetrics, width: f32) {
     let header_h = if m.control_height <= 30.0 { 32.0 } else { 38.0 };
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, header_h), Sense::hover());
@@ -485,39 +496,67 @@ pub fn workbench_task_header(ui: &mut Ui, p: Palette, m: DensityMetrics, width: 
         let cols = workbench_cols(rect);
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(5), p.bg_canvas);
-        let font = FontId::proportional(m.h3_size);
-        let cy = rect.center().y;
-        painter.text(
-            egui::pos2(cols.id_left, cy),
-            Align2::LEFT_CENTER,
-            "编号",
-            font.clone(),
-            p.text_primary,
-        );
-        painter.text(
-            egui::pos2(cols.name_left, cy),
-            Align2::LEFT_CENTER,
-            "文件名称与位置",
-            font.clone(),
-            p.text_primary,
-        );
-        painter.text(
-            egui::pos2(cols.size_right, cy),
-            Align2::RIGHT_CENTER,
-            "大小",
-            font.clone(),
-            p.text_primary,
-        );
-        painter.text(
-            egui::pos2(cols.status_center_x, cy),
-            Align2::CENTER_CENTER,
-            "状态",
-            font,
-            p.text_primary,
-        );
         painter.line_segment(
             [rect.left_bottom(), rect.right_bottom()],
             Stroke::new(1.0, p.border_control),
+        );
+
+        let place_hdr = |ui: &mut Ui, col_rect: egui::Rect, layout: egui::Layout, text: &str| {
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(col_rect).layout(layout),
+                |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .size(m.h3_size)
+                                .color(p.text_primary),
+                        )
+                        .selectable(true),
+                    );
+                },
+            );
+        };
+
+        let id_rect = egui::Rect::from_min_max(
+            egui::pos2(cols.id_left, rect.top()),
+            egui::pos2(cols.name_left - 4.0, rect.bottom()),
+        );
+        let name_rect = egui::Rect::from_min_max(
+            egui::pos2(cols.name_left, rect.top()),
+            egui::pos2(cols.name_left + cols.name_width, rect.bottom()),
+        );
+        let size_rect = egui::Rect::from_min_max(
+            egui::pos2(cols.size_right - 82.0, rect.top()),
+            egui::pos2(cols.size_right, rect.bottom()),
+        );
+        let status_rect = egui::Rect::from_min_max(
+            egui::pos2(cols.status_center_x - cols.status_width * 0.5, rect.top()),
+            egui::pos2(cols.status_center_x + cols.status_width * 0.5, rect.bottom()),
+        );
+
+        place_hdr(
+            ui,
+            id_rect,
+            egui::Layout::left_to_right(egui::Align::Center),
+            "编号",
+        );
+        place_hdr(
+            ui,
+            name_rect,
+            egui::Layout::left_to_right(egui::Align::Center),
+            "文件名称与位置",
+        );
+        place_hdr(
+            ui,
+            size_rect,
+            egui::Layout::right_to_left(egui::Align::Center),
+            "大小",
+        );
+        place_hdr(
+            ui,
+            status_rect,
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            "状态",
         );
     }
 }
@@ -767,12 +806,11 @@ pub fn principle_card_row(
         for (&(title, desc), (tg, dg)) in cards.iter().zip(layouts.iter()) {
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::hover());
             resp.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Label, true, format!("{title}：{desc}"))
+                WidgetInfo::labeled(WidgetType::Panel, true, format!("原则卡片：{title}"))
             });
 
             if ui.is_rect_visible(rect) {
-                let pnt = ui.painter();
-                pnt.rect(
+                ui.painter().rect(
                     rect,
                     CornerRadius::same(8),
                     p.bg_surface,
@@ -783,12 +821,37 @@ pub fn principle_card_row(
                 let block_h = tg.size().y + title_gap + dg.size().y;
                 let top_y = (rect.center().y - block_h * 0.5).round();
                 let left_x = (rect.left() + pad_x).round();
-                let clip = pnt.with_clip_rect(rect.shrink(4.0));
-                clip.galley(egui::pos2(left_x, top_y), tg.clone(), p.text_primary);
-                clip.galley(
-                    egui::pos2(left_x, top_y + tg.size().y + title_gap),
-                    dg.clone(),
-                    p.text_secondary,
+                let text_rect = egui::Rect::from_min_size(
+                    egui::pos2(left_x, top_y),
+                    Vec2::new(text_w, (rect.bottom() - top_y - 4.0).max(block_h)),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(text_rect)
+                        .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                    |ui| {
+                        ui.set_width(text_w);
+                        ui.set_max_width(text_w);
+                        ui.spacing_mut().item_spacing.y = title_gap;
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(title)
+                                    .size(m.h3_size)
+                                    .color(p.text_primary),
+                            )
+                            .selectable(true)
+                            .wrap(),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(desc)
+                                    .size(m.secondary_size)
+                                    .color(p.text_secondary),
+                            )
+                            .selectable(true)
+                            .wrap(),
+                        );
+                    },
                 );
             }
         }
@@ -1174,12 +1237,11 @@ pub fn status_banner_grid(
 
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(bw, box_h), Sense::hover());
                 resp.widget_info(|| {
-                    WidgetInfo::labeled(WidgetType::Label, true, format!("{title}：{desc}"))
+                    WidgetInfo::labeled(WidgetType::Panel, true, format!("状态横幅：{title}"))
                 });
 
                 if ui.is_rect_visible(rect) {
-                    let pnt = ui.painter();
-                    pnt.rect(
+                    ui.painter().rect(
                         rect,
                         CornerRadius::same(6),
                         bg,
@@ -1189,12 +1251,35 @@ pub fn status_banner_grid(
                     let block_h = tg.size().y + title_gap + dg.size().y;
                     let top_y = (rect.center().y - block_h * 0.5).round();
                     let left_x = (rect.left() + pad_x).round();
-                    let clip = pnt.with_clip_rect(rect.shrink(4.0));
-                    clip.galley(egui::pos2(left_x, top_y), tg.clone(), fg);
-                    clip.galley(
-                        egui::pos2(left_x, top_y + tg.size().y + title_gap),
-                        dg.clone(),
-                        p.text_primary,
+                    let text_rect = egui::Rect::from_min_size(
+                        egui::pos2(left_x, top_y),
+                        Vec2::new(text_w, (rect.bottom() - top_y - 4.0).max(block_h)),
+                    );
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(text_rect)
+                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                        |ui| {
+                            ui.set_width(text_w);
+                            ui.set_max_width(text_w);
+                            ui.spacing_mut().item_spacing.y = title_gap;
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(title).size(m.body_size).color(fg),
+                                )
+                                .selectable(true)
+                                .wrap(),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(desc)
+                                        .size(m.secondary_size)
+                                        .color(p.text_primary),
+                                )
+                                .selectable(true)
+                                .wrap(),
+                            );
+                        },
                     );
                 }
             }

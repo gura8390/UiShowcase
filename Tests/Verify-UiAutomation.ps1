@@ -166,10 +166,10 @@ try {
 
     # 3. 验证总览页四张原则卡等宽等高 + 色板网格不重叠 + 字体层级纵向堆叠 + 浅/深色切换
     $pCards = @(
-        (Find-ByNameContains $win "01 · GPU 锐利字体" 3000),
-        (Find-ByNameContains $win "02 · 色阶与细线分层" 3000),
-        (Find-ByNameContains $win "03 · 语义双主题" 3000),
-        (Find-ByNameContains $win "04 · 居中与无障碍" 3000)
+        (Find-ByName $win "原则卡片：01 · GPU 锐利字体" 3000),
+        (Find-ByName $win "原则卡片：02 · 色阶与细线分层" 3000),
+        (Find-ByName $win "原则卡片：03 · 语义双主题" 3000),
+        (Find-ByName $win "原则卡片：04 · 居中与无障碍" 3000)
     )
     if ($pCards | Where-Object { $null -eq $_ }) {
         throw "总览页四张核心原则卡片节点缺失"
@@ -300,10 +300,10 @@ try {
     $btnSimErr = Find-ByName $win "模拟非法输入" 3000
     $toggleA = Find-ByName $win "保存配置时自动校验完整性" 3000
     $toggleB = Find-ByName $win "列表中仅展示存在异常的记录" 3000
-    $bnInfo = Find-ByNameContains $win "[信息] OpenGL" 3000
-    $bnOk = Find-ByNameContains $win "[成功] 本地设置" 3000
-    $bnWarn = Find-ByNameContains $win "[警告] 检测到" 3000
-    $bnErr = Find-ByNameContains $win "[错误] 目标目录" 3000
+    $bnInfo = Find-ByNameContains $win "状态横幅：[信息] OpenGL" 3000
+    $bnOk = Find-ByNameContains $win "状态横幅：[成功] 本地设置" 3000
+    $bnWarn = Find-ByNameContains $win "状态横幅：[警告] 检测到" 3000
+    $bnErr = Find-ByNameContains $win "状态横幅：[错误] 目标目录" 3000
     $sliderEl = Find-ByName $win "并发扫描阈值" 3000
     if ($null -eq $editDir -or $null -eq $btnSimErr -or $null -eq $toggleA -or $null -eq $toggleB -or $null -eq $bnInfo -or $null -eq $bnOk -or $null -eq $bnWarn -or $null -eq $bnErr -or $null -eq $sliderEl) {
         throw "控件页关键节点缺失"

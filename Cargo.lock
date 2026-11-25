@@ -2600,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "ui-showcase"
-version = "0.0.2"
+version = "0.0.2-p1"
 dependencies = [
  "eframe",
  "image",

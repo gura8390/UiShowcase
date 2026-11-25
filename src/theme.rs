@@ -336,6 +336,8 @@ pub fn setup_fonts(ctx: &egui::Context, choice: FontChoice) {
 
 pub fn apply_theme(ctx: &egui::Context, p: Palette, m: DensityMetrics) {
     let mut style = (*ctx.style()).clone();
+    // 统一文本可选规范：所有非交互展示文本均允许鼠标拖动选中与复制
+    style.interaction.selectable_labels = true;
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(14.0, 6.0);
     style.spacing.interact_size = egui::vec2(40.0, m.control_height);
