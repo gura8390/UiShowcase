@@ -55,7 +55,7 @@ pub fn styled_button(
     };
     let min_w = (galley.size().x + pad_x * 2.0).max(68.0);
     let width = if full_width {
-        ui.available_width().max(min_w)
+        ui.available_width().max(48.0)
     } else {
         min_w
     };
@@ -149,13 +149,17 @@ pub fn styled_button(
     }
 }
 
-/// 左侧导航项（完整五态 Default/Hover/Pressed/Disabled/Focused + 左侧 3px 选中指示条 + AccessKit 语义）
+/// 左侧导航项（完整五态 + 可选左侧 3px 选中指示条 + 窄栏居中精简排版 + AccessKit 完整中文语义）
+#[allow(clippy::too_many_arguments)]
 pub fn nav_item(
     ui: &mut Ui,
     p: Palette,
     m: DensityMetrics,
-    label: &str,
+    display_label: &str,
+    accessible_label: &str,
     selected: bool,
+    compact: bool,
+    draw_indicator: bool,
 ) -> Response {
     let enabled = ui.is_enabled();
     let desired = Vec2::new(ui.available_width(), m.nav_item_height);
@@ -166,7 +170,7 @@ pub fn nav_item(
             WidgetType::SelectableLabel,
             enabled,
             selected,
-            format!("导航：{label}"),
+            format!("导航：{accessible_label}"),
         )
     });
 
@@ -193,7 +197,7 @@ pub fn nav_item(
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(6), bg);
 
-        if selected {
+        if selected && draw_indicator {
             let ind_h = 18.0;
             let ind_rect = egui::Rect::from_min_size(
                 egui::pos2(rect.left() + 4.0, rect.center().y - ind_h / 2.0),
@@ -215,19 +219,39 @@ pub fn nav_item(
             );
         }
 
-        painter.text(
-            egui::pos2(rect.left() + 18.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            FontId::proportional(m.body_size),
-            fg,
-        );
+        let font_size = if compact && rect.width() < 84.0 {
+            m.secondary_size
+        } else {
+            m.body_size
+        };
+        if compact {
+            painter.text(
+                egui::pos2(rect.center().x + 2.0, rect.center().y),
+                Align2::CENTER_CENTER,
+                display_label,
+                FontId::proportional(font_size),
+                fg,
+            );
+        } else {
+            painter.text(
+                egui::pos2(rect.left() + 18.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                display_label,
+                FontId::proportional(font_size),
+                fg,
+            );
+        }
     }
 
-    if enabled {
-        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let resp = if compact {
+        response.on_hover_text(accessible_label)
     } else {
         response
+    };
+    if enabled {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
     }
 }
 
@@ -1574,4 +1598,131 @@ pub fn equal_height_card_pair(
         });
         ui.ctx().request_repaint();
     }
+}
+
+/// 统一居中模态弹窗容器（全站所有弹窗——设置、关于、二次确认——遵循同一视觉与动画标准）：
+/// - 从主窗口正中央向外缓出缩放（0.88 -> 1.0）+ 淡入（160ms，遵循系统「减少动画」降级为 0ms）；
+/// - 动画完成后零空闲重绘；
+/// - 支持 Esc、点击遮罩与右上角「关闭」按钮关闭，内置纵向滚动确保最小窗口下内容完整可操作。
+#[allow(clippy::too_many_arguments)]
+pub fn centered_modal(
+    ctx: &egui::Context,
+    p: Palette,
+    m: DensityMetrics,
+    id_salt: &str,
+    title: &str,
+    opened_at: Option<std::time::Instant>,
+    target_w: f32,
+    target_h: f32,
+    add_contents: impl FnOnce(&mut Ui),
+) -> bool {
+    let mut should_close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+
+    let duration_secs = if crate::system::prefers_reduced_motion() {
+        0.0_f32
+    } else {
+        0.16_f32
+    };
+    let raw_t = if duration_secs <= 0.0 {
+        1.0
+    } else {
+        opened_at
+            .map(|t0| (t0.elapsed().as_secs_f32() / duration_secs).clamp(0.0, 1.0))
+            .unwrap_or(1.0)
+    };
+    if raw_t < 1.0 {
+        ctx.request_repaint();
+    }
+    // 三次缓出曲线（ease-out cubic）：从中央平滑弹出，无弹跳过冲
+    let ease = 1.0 - (1.0 - raw_t).powi(3);
+    let scale = egui::lerp(0.88..=1.0, ease);
+
+    let screen = ctx.viewport_rect();
+    let scrim_alpha = (115.0 * ease).round() as u8;
+    egui::Area::new(egui::Id::new(("modal_scrim", id_salt)))
+        .fixed_pos(screen.min)
+        .order(egui::Order::Middle)
+        .show(ctx, |ui| {
+            let (_, resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+            ui.painter()
+                .rect_filled(screen, CornerRadius::ZERO, Color32::from_black_alpha(scrim_alpha));
+            if resp.clicked() {
+                should_close = true;
+            }
+        });
+
+    let clamped_w = target_w.min((screen.width() - 48.0).max(320.0));
+    let clamped_h = target_h.min((screen.height() - 48.0).max(180.0));
+    let cur_w = (clamped_w * scale).round();
+    let cur_h = (clamped_h * scale).round();
+    let modal_rect = egui::Rect::from_center_size(screen.center(), Vec2::new(cur_w, cur_h));
+
+    egui::Area::new(egui::Id::new(("modal_dialog", id_salt)))
+        .fixed_pos(modal_rect.min)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.multiply_opacity(ease);
+            egui::Frame::new()
+                .fill(p.bg_surface)
+                .stroke(Stroke::new(1.0, p.border_control))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20))
+                .show(ui, |ui| {
+                    let inner_w = (cur_w - 40.0).max(260.0);
+                    let inner_h = (cur_h - 40.0).max(120.0);
+                    ui.set_min_size(Vec2::new(inner_w, inner_h));
+                    ui.set_max_size(Vec2::new(inner_w, inner_h));
+                    ui.vertical(|ui| {
+                        ui.set_width(inner_w);
+                        ui.horizontal(|ui| {
+                            ui.set_width(inner_w);
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .size(m.h2_size)
+                                    .color(p.text_primary),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let close_resp = styled_button(
+                                        ui,
+                                        p,
+                                        m,
+                                        "关闭",
+                                        ButtonKind::Ghost,
+                                        true,
+                                        false,
+                                    );
+                                    close_resp.widget_info(|| {
+                                        WidgetInfo::labeled(WidgetType::Button, true, "关闭弹窗")
+                                    });
+                                    if close_resp.clicked() {
+                                        should_close = true;
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(10.0);
+                        let (sep, _) = ui.allocate_exact_size(
+                            Vec2::new(inner_w, 1.0),
+                            Sense::hover(),
+                        );
+                        ui.painter().line_segment(
+                            [sep.left_center(), sep.right_center()],
+                            Stroke::new(1.0, p.border_subtle),
+                        );
+                        ui.add_space(12.0);
+
+                        egui::ScrollArea::vertical()
+                            .id_salt(("modal_scroll", id_salt))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                add_contents(ui);
+                            });
+                    });
+                });
+        });
+
+    should_close
 }

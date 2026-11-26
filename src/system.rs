@@ -9,9 +9,7 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
-};
+use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RegGetValueW};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Shell::{
@@ -467,99 +465,128 @@ pub fn is_windows_dark_theme() -> bool {
     status == ERROR_SUCCESS && data == 0
 }
 
-pub fn autostart_value_name() -> String {
-    std::env::var("UISHOWCASE_AUTORUN_NAME")
+pub fn startup_dir() -> Result<std::path::PathBuf, String> {
+    if let Ok(custom) = std::env::var("UISHOWCASE_STARTUP_DIR")
+        && !custom.trim().is_empty()
+    {
+        return Ok(std::path::PathBuf::from(custom));
+    }
+    let appdata = std::env::var_os("APPDATA")
+        .ok_or_else(|| "无法读取 APPDATA 环境变量，未能定位 Windows 启动文件夹。".to_owned())?;
+    Ok(std::path::PathBuf::from(appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Startup"))
+}
+
+pub fn startup_shortcut_path() -> Result<std::path::PathBuf, String> {
+    let base_name = std::env::var("UISHOWCASE_AUTORUN_NAME")
         .ok()
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "澄明界面展示".to_owned())
+        .unwrap_or_else(|| "澄明界面展示".to_owned());
+    let file_name = if base_name.to_lowercase().ends_with(".lnk") {
+        base_name
+    } else {
+        format!("{base_name}.lnk")
+    };
+    Ok(startup_dir()?.join(file_name))
 }
 
 pub fn is_autostart_enabled() -> bool {
-    let subkey = to_wide(r"Software\Microsoft\Windows\CurrentVersion\Run");
-    let name = to_wide(&autostart_value_name());
-    let mut size: u32 = 0;
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            subkey.as_ptr(),
-            name.as_ptr(),
-            RRF_RT_REG_SZ,
-            null_mut(),
-            null_mut(),
-            &mut size,
-        )
-    };
-    status == ERROR_SUCCESS && size > 2
+    startup_shortcut_path().is_ok_and(|p| p.is_file())
 }
 
 pub fn get_autostart_command() -> String {
-    let subkey = to_wide(r"Software\Microsoft\Windows\CurrentVersion\Run");
-    let name = to_wide(&autostart_value_name());
-    let mut size: u32 = 0;
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            subkey.as_ptr(),
-            name.as_ptr(),
-            RRF_RT_REG_SZ,
-            null_mut(),
-            null_mut(),
-            &mut size,
-        )
+    let Ok(lnk_path) = startup_shortcut_path() else {
+        return "未能定位 Windows 启动文件夹".to_owned();
     };
-    if status != ERROR_SUCCESS || size == 0 {
-        return "未注册".to_owned();
+    if !lnk_path.is_file() {
+        return format!("未启用（启动文件夹：{}）", lnk_path.parent().map(|p| p.display().to_string()).unwrap_or_default());
     }
-    let mut buf = vec![0u16; (size as usize / 2) + 1];
-    let status2 = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            subkey.as_ptr(),
-            name.as_ptr(),
-            RRF_RT_REG_SZ,
-            null_mut(),
-            buf.as_mut_ptr().cast(),
-            &mut size,
-        )
-    };
-    if status2 != ERROR_SUCCESS {
-        return "未注册".to_owned();
-    }
-    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    String::from_utf16_lossy(&buf[..len])
+    format!("已创建快捷方式：{}", lnk_path.display())
 }
 
 pub fn set_autostart_enabled(enable: bool, start_minimized: bool) -> Result<(), String> {
-    let subkey = to_wide(r"Software\Microsoft\Windows\CurrentVersion\Run");
-    let name = to_wide(&autostart_value_name());
-    if enable {
-        let exe = std::env::current_exe().map_err(|e| format!("无法获取程序路径：{e}"))?;
-        let cmd = if start_minimized {
-            format!("\"{}\" --minimized", exe.display())
-        } else {
-            format!("\"{}\"", exe.display())
-        };
-        let wide_cmd = to_wide(&cmd);
-        let bytes_len = (wide_cmd.len() * 2) as u32;
-        let status = unsafe {
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                subkey.as_ptr(),
-                name.as_ptr(),
-                REG_SZ,
-                wide_cmd.as_ptr().cast(),
-                bytes_len,
-            )
-        };
-        if status != ERROR_SUCCESS {
-            return Err(format!("写入登录启动项失败（错误码：{status}）。"));
+    let lnk_path = startup_shortcut_path()?;
+    if !enable {
+        if lnk_path.exists() {
+            std::fs::remove_file(&lnk_path)
+                .map_err(|e| format!("移除启动快捷方式失败：{e}"))?;
         }
-    } else {
-        unsafe {
-            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey.as_ptr(), name.as_ptr());
-        }
+        return Ok(());
     }
-    Ok(())
+
+    if let Some(parent) = lnk_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("无法访问 Windows 启动文件夹：{e}"))?;
+    }
+
+    let exe = std::env::current_exe().map_err(|e| format!("无法获取当前程序路径：{e}"))?;
+    let work_dir = exe
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let args = if start_minimized { "--minimized" } else { "" };
+
+    create_windows_shortcut(&lnk_path, &exe, &work_dir, args, "澄明界面展示")
+}
+
+fn create_windows_shortcut(
+    lnk_path: &std::path::Path,
+    target_exe: &std::path::Path,
+    working_dir: &std::path::Path,
+    arguments: &str,
+    description: &str,
+) -> Result<(), String> {
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        CoUninitialize, IPersistFile,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{Interface, PCWSTR};
+
+    let init_hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let need_uninit = init_hr.is_ok();
+
+    let result = (|| -> Result<(), String> {
+        let link: IShellLinkW = unsafe {
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|e| format!("无法创建快捷方式组件：{e}"))?
+        };
+        let target_w = to_wide(&target_exe.to_string_lossy());
+        let work_w = to_wide(&working_dir.to_string_lossy());
+        let args_w = to_wide(arguments);
+        let desc_w = to_wide(description);
+        let lnk_w = to_wide(&lnk_path.to_string_lossy());
+
+        unsafe {
+            link.SetPath(PCWSTR(target_w.as_ptr()))
+                .map_err(|e| format!("设置快捷方式目标路径失败：{e}"))?;
+            link.SetWorkingDirectory(PCWSTR(work_w.as_ptr()))
+                .map_err(|e| format!("设置快捷方式工作目录失败：{e}"))?;
+            link.SetArguments(PCWSTR(args_w.as_ptr()))
+                .map_err(|e| format!("设置快捷方式启动参数失败：{e}"))?;
+            link.SetDescription(PCWSTR(desc_w.as_ptr()))
+                .map_err(|e| format!("设置快捷方式描述失败：{e}"))?;
+            link.SetIconLocation(PCWSTR(target_w.as_ptr()), 0)
+                .map_err(|e| format!("设置快捷方式图标失败：{e}"))?;
+
+            let persist: IPersistFile = link
+                .cast()
+                .map_err(|e| format!("获取快捷方式持久化接口失败：{e}"))?;
+            persist
+                .Save(PCWSTR(lnk_w.as_ptr()), true)
+                .map_err(|e| format!("保存启动快捷方式失败：{e}"))?;
+        }
+        Ok(())
+    })();
+
+    if need_uninit {
+        unsafe { CoUninitialize() };
+    }
+    result
 }
 
 pub fn load_window_icon() -> Option<egui::IconData> {

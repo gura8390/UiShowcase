@@ -8,9 +8,9 @@ use crate::system::{
 };
 use crate::theme::{DensityMetrics, Palette, apply_theme, hex_color, resolve_palette, setup_fonts};
 use crate::widgets::{
-    ButtonKind, StatusKind, equal_height_card_pair, nav_item, principle_card_row, segment_bar,
-    status_badge, status_banner, status_banner_grid, styled_button, styled_dropdown, styled_slider,
-    surface_card, toggle_switch, workbench_task_header, workbench_task_row,
+    ButtonKind, StatusKind, centered_modal, equal_height_card_pair, nav_item, principle_card_row,
+    segment_bar, status_badge, status_banner, status_banner_grid, styled_button, styled_dropdown,
+    styled_slider, surface_card, toggle_switch, workbench_task_header, workbench_task_row,
 };
 use eframe::egui::{self, Color32, CornerRadius, RichText, Stroke, ViewportCommand};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -22,18 +22,37 @@ pub enum Page {
     Overview,
     Workbench,
     Controls,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveModal {
+    None,
     Settings,
     About,
+    ConfirmDelete,
 }
 
 impl Page {
+    fn index(self) -> usize {
+        match self {
+            Page::Overview => 0,
+            Page::Workbench => 1,
+            Page::Controls => 2,
+        }
+    }
     fn title(self) -> &'static str {
         match self {
             Page::Overview => "总览与色板",
             Page::Workbench => "典型工具界面",
             Page::Controls => "控件与交互态",
-            Page::Settings => "主题与设置",
-            Page::About => "关于与环境",
+        }
+    }
+
+    fn short_title(self) -> &'static str {
+        match self {
+            Page::Overview => "总览",
+            Page::Workbench => "工作台",
+            Page::Controls => "控件",
         }
     }
 
@@ -42,8 +61,6 @@ impl Page {
             Page::Overview => "展示「澄明原生工具风 · Rust + egui」语义色板、排版层级与 OpenGL 原生清晰渲染",
             Page::Workbench => "模拟真实 Windows 桌面核查工具工作台：工具栏、列表、详情面板、任务进度与空状态",
             Page::Controls => "完整演示五态按钮、内联校验错误、开关、分段选择、下拉框、滑块及键盘焦点外描边",
-            Page::Settings => "实时切换字体、主题模式、强调色与密度，管理托盘行为与登录时启动（真实持久化）",
-            Page::About => "统一中文标识、版本号与当前 Rust + egui OpenGL (glow) / DPI 渲染环境读数",
         }
     }
 }
@@ -129,7 +146,13 @@ pub struct ShowcaseApp {
     settings_has_error: bool,
 
     page: Page,
-    status_message: String,
+    page_switched_at: Option<Instant>,
+    page_switch_dir: f32,
+    nav_indicator_from_y: Option<f32>,
+    nav_indicator_last_y: Option<f32>,
+    modal: ActiveModal,
+    modal_opened_at: Option<Instant>,
+    last_window_w: f32,
     icon_texture: Option<egui::TextureHandle>,
     hwnd_raw: isize,
     last_dark_applied: Option<bool>,
@@ -208,8 +231,13 @@ impl ShowcaseApp {
             settings_feedback,
             settings_has_error,
             page: Page::Overview,
-            status_message: "就绪 · Rust + egui（OpenGL / glow + AccessKit）原生渲染已启动"
-                .to_owned(),
+            page_switched_at: None,
+            page_switch_dir: 1.0,
+            nav_indicator_from_y: None,
+            nav_indicator_last_y: None,
+            modal: ActiveModal::None,
+            modal_opened_at: None,
+            last_window_w: 0.0,
             icon_texture,
             hwnd_raw,
             last_dark_applied: Some(palette.dark),
@@ -251,20 +279,10 @@ impl ShowcaseApp {
             Ok(()) => {
                 self.settings_feedback = format!("{reason}（已持久化保存至本地配置）");
                 self.settings_has_error = false;
-                self.status_message = format!(
-                    "{reason} · 当前：{} / {}",
-                    if p.dark { "深色模式" } else { "浅色模式" },
-                    if self.settings.density_mode == DensityMode::Compact {
-                        "紧凑密度"
-                    } else {
-                        "标准密度"
-                    }
-                );
             }
             Err(err) => {
-                self.settings_feedback = err.clone();
+                self.settings_feedback = err;
                 self.settings_has_error = true;
-                self.status_message = err;
             }
         }
     }
@@ -275,6 +293,49 @@ impl ShowcaseApp {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
+    fn switch_page(&mut self, ctx: &egui::Context, next: Page) {
+        if self.page == next {
+            return;
+        }
+        self.page_switch_dir = if next.index() > self.page.index() {
+            1.0
+        } else {
+            -1.0
+        };
+        self.nav_indicator_from_y = self.nav_indicator_last_y;
+        self.page = next;
+        self.page_switched_at = Some(Instant::now());
+        ctx.request_repaint();
+    }
+
+    fn page_transition_state(&self, ctx: &egui::Context) -> (f32, egui::Vec2) {
+        if crate::system::prefers_reduced_motion() {
+            return (1.0, egui::Vec2::ZERO);
+        }
+        let Some(t0) = self.page_switched_at else {
+            return (1.0, egui::Vec2::ZERO);
+        };
+        // 规范切换式动画：方向性纵向微滑入（±14pt）+ 淡入（150ms ease-out cubic）
+        let raw_t = (t0.elapsed().as_secs_f32() / 0.15_f32).clamp(0.0, 1.0);
+        if raw_t < 1.0 {
+            ctx.request_repaint();
+        }
+        let ease = 1.0 - (1.0 - raw_t).powi(3);
+        let offset = egui::vec2(0.0, (1.0 - ease) * 14.0 * self.page_switch_dir);
+        (ease, offset)
+    }
+
+    fn open_modal(&mut self, modal: ActiveModal) {
+        self.modal = modal;
+        self.modal_opened_at = Some(Instant::now());
+    }
+
+    fn close_modal(&mut self) {
+        self.modal = ActiveModal::None;
+        self.modal_opened_at = None;
+        self.confirm_delete_id = None;
+    }
+
     fn process_tray_events(&mut self, ctx: &egui::Context) {
         while let Ok(ev) = self.tray_rx.try_recv() {
             match ev {
@@ -282,14 +343,12 @@ impl ShowcaseApp {
                     ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
-                    self.status_message = "已从系统托盘恢复主窗口".to_owned();
                 }
                 TrayEvent::OpenSettings => {
-                    self.page = Page::Settings;
+                    self.open_modal(ActiveModal::Settings);
                     ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
-                    self.status_message = "已从托盘打开「主题与设置」".to_owned();
                 }
                 TrayEvent::ToggleTheme => {
                     let cur = resolve_palette(self.settings.theme_mode, self.settings.accent_preset);
@@ -322,7 +381,6 @@ impl ShowcaseApp {
             if pct >= 100 {
                 self.scanning = false;
                 self.scan_status_text = format!("已完成核查 · 共 {} 项", self.tasks.len());
-                self.status_message = "模拟核查完成：后台任务期间界面保持流畅可响应".to_owned();
             } else {
                 self.scan_status_text = format!("正在核查文件哈希（{pct}%）…");
                 ctx.request_repaint_after(Duration::from_millis(160));
@@ -350,24 +408,53 @@ impl ShowcaseApp {
     }
 
     fn render_sidebar(&mut self, ctx: &egui::Context, p: Palette, m: DensityMetrics) {
-        egui::SidePanel::left("main_nav")
-            .exact_width(m.nav_width)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(p.bg_canvas)
-                    .stroke(Stroke::NONE)
-                    .inner_margin(egui::Margin::symmetric(14, 18)),
-            )
-            .show(ctx, |ui| {
-                // 右侧 1px 细分隔线
-                let panel_rect = ui.max_rect().expand2(egui::vec2(14.0, 18.0));
-                ui.painter().line_segment(
-                    [panel_rect.right_top(), panel_rect.right_bottom()],
-                    Stroke::new(1.0, p.border_subtle),
-                );
+        let win_w = ctx.viewport_rect().width().max(320.0);
+        let ratio_w = (win_w * 0.10).clamp(76.0, 280.0).round();
+        let window_resized = (win_w - self.last_window_w).abs() > 1.5;
 
-                // 品牌区
+        let panel = egui::SidePanel::left("main_nav").frame(
+            egui::Frame::new()
+                .fill(p.bg_canvas)
+                .stroke(Stroke::NONE)
+                .inner_margin(egui::Margin::symmetric(8, 16)),
+        );
+        // 窗口尺寸变化时在当前帧严格对齐 1:9 比例，其余帧保持可自由拖动（76..=280pt）
+        let panel = if window_resized {
+            self.last_window_w = win_w;
+            ctx.request_repaint();
+            panel.exact_width(ratio_w).resizable(false)
+        } else {
+            panel
+                .resizable(true)
+                .default_width(ratio_w)
+                .width_range(76.0..=280.0)
+        };
+
+        panel.show(ctx, |ui| {
+            // 右侧 1px 细分隔线
+            let panel_rect = ui.max_rect().expand2(egui::vec2(8.0, 16.0));
+            ui.painter().line_segment(
+                [panel_rect.right_top(), panel_rect.right_bottom()],
+                Stroke::new(1.0, p.border_subtle),
+            );
+
+            let panel_w = panel_rect.width();
+            let compact = panel_w < 148.0;
+
+            // 品牌区（窄栏自动居中紧凑排版，宽栏展示完整标题）
+            if compact {
+                ui.vertical_centered(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    if let Some(tex) = &self.icon_texture {
+                        ui.add(egui::Image::new((tex.id(), egui::vec2(26.0, 26.0))));
+                    }
+                    ui.label(
+                        RichText::new("澄明")
+                            .size(m.body_size)
+                            .color(p.text_primary),
+                    );
+                });
+            } else {
                 ui.horizontal(|ui| {
                     if let Some(tex) = &self.icon_texture {
                         ui.add(egui::Image::new((tex.id(), egui::vec2(28.0, 28.0))));
@@ -387,64 +474,78 @@ impl ShowcaseApp {
                         );
                     });
                 });
+            }
 
-                ui.add_space(20.0);
+            ui.add_space(16.0);
 
-                for (pg, label) in [
-                    (Page::Overview, "总览与色板"),
-                    (Page::Workbench, "典型工具界面"),
-                    (Page::Controls, "控件与交互态"),
-                ] {
-                    if nav_item(ui, p, m, label, self.page == pg).clicked() {
-                        self.page = pg;
-                        self.status_message = format!("已切换到「{}」", pg.title());
-                    }
-                    ui.add_space(2.0);
-                }
-
-                ui.add_space(8.0);
-                let (sep_rect, _) =
-                    ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-                ui.painter().line_segment(
-                    [sep_rect.left_center(), sep_rect.right_center()],
-                    Stroke::new(1.0, p.border_subtle),
+            let mut active_rect: Option<egui::Rect> = None;
+            let mut next_page: Option<Page> = None;
+            for pg in [Page::Overview, Page::Workbench, Page::Controls] {
+                let display_label = if compact {
+                    pg.short_title()
+                } else {
+                    pg.title()
+                };
+                let resp = nav_item(
+                    ui,
+                    p,
+                    m,
+                    display_label,
+                    pg.title(),
+                    self.page == pg,
+                    compact,
+                    false,
                 );
-                ui.add_space(8.0);
-
-                for (pg, label) in [(Page::Settings, "主题与设置"), (Page::About, "关于与环境")] {
-                    if nav_item(ui, p, m, label, self.page == pg).clicked() {
-                        self.page = pg;
-                        self.status_message = format!("已切换到「{}」", pg.title());
-                    }
-                    ui.add_space(2.0);
+                if self.page == pg {
+                    active_rect = Some(resp.rect);
                 }
+                if resp.clicked() {
+                    next_page = Some(pg);
+                }
+                ui.add_space(4.0);
+            }
 
-                // 底部提示卡片与退出按钮
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    if styled_button(ui, p, m, "退出应用", ButtonKind::Secondary, true, true)
-                        .clicked()
-                    {
-                        self.request_exit(ctx);
+            // 左侧 3px 品牌强调色指示条沿导航项平滑跟滑（140ms ease-out cubic，减少动画时 0ms）
+            if let Some(rect) = active_rect {
+                let target_y = rect.center().y;
+                let cur_y = if crate::system::prefers_reduced_motion() {
+                    target_y
+                } else if let (Some(from_y), Some(t0)) =
+                    (self.nav_indicator_from_y, self.page_switched_at)
+                {
+                    let raw_t = (t0.elapsed().as_secs_f32() / 0.14_f32).clamp(0.0, 1.0);
+                    if raw_t < 1.0 {
+                        ctx.request_repaint();
                     }
-                    ui.add_space(10.0);
-                    egui::Frame::new()
-                        .fill(p.bg_surface)
-                        .stroke(Stroke::new(1.0, p.border_subtle))
-                        .corner_radius(CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(12, 10))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                RichText::new("提示：按 Tab 键可体验统一 2px 键盘焦点外描边，Ctrl+Q 直接退出。")
-                                    .size(m.caption_size)
-                                    .color(p.text_muted),
-                            );
-                        });
-                });
-            });
+                    let ease = 1.0 - (1.0 - raw_t).powi(3);
+                    egui::lerp(from_y..=target_y, ease)
+                } else {
+                    target_y
+                };
+                self.nav_indicator_last_y = Some(cur_y);
+
+                let ind_h = 18.0;
+                let ind_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 4.0, cur_y - ind_h / 2.0),
+                    egui::vec2(3.0, ind_h),
+                );
+                ui.painter()
+                    .rect_filled(ind_rect, CornerRadius::same(2), p.accent_primary);
+            }
+
+            if let Some(pg) = next_page {
+                self.switch_page(ctx, pg);
+            }
+        });
     }
 
-    fn render_header(&mut self, ctx: &egui::Context, p: Palette, m: DensityMetrics) {
+    fn render_header(
+        &mut self,
+        ctx: &egui::Context,
+        p: Palette,
+        m: DensityMetrics,
+        title_opacity: f32,
+    ) {
         egui::TopBottomPanel::top("page_header")
             .frame(
                 egui::Frame::new()
@@ -462,187 +563,49 @@ impl ShowcaseApp {
                 );
 
                 let avail_w = ui.available_width();
-                // 宽屏并排（预留右侧三组等高分段开关 + ≥28pt 安全留白）；窄窗（如 820px 最小窗口）自动折为两行防溢出
-                if avail_w >= 640.0 {
-                    let left_max_w = (avail_w - 396.0).max(200.0);
-                    ui.horizontal(|ui| {
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(left_max_w, 0.0),
-                            egui::Layout::top_down(egui::Align::LEFT),
-                            |ui| {
-                                ui.set_width(left_max_w);
-                                ui.set_max_width(left_max_w);
-                                ui.spacing_mut().item_spacing.y = 4.0;
-                                ui.label(
-                                    RichText::new(self.page.title())
-                                        .size(m.h1_size)
-                                        .color(p.text_primary),
-                                );
-                                ui.label(
-                                    RichText::new(self.page.subtitle())
-                                        .size(m.secondary_size)
-                                        .color(p.text_secondary),
-                                );
-                            },
-                        );
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let mut is_dark = p.dark;
-                            if segment_bar(
-                                ui,
-                                p,
-                                m,
-                                &mut is_dark,
-                                &[(false, "浅色"), (true, "深色")],
-                                "快速切换主题",
-                            ) {
-                                self.settings.theme_mode = if is_dark {
-                                    ThemeMode::Dark
-                                } else {
-                                    ThemeMode::Light
-                                };
-                                self.apply_visuals_and_save(ctx, "主题模式已更新", false);
-                            }
-
-                            ui.add_space(8.0);
-                            let mut density = self.settings.density_mode;
-                            if segment_bar(
-                                ui,
-                                p,
-                                m,
-                                &mut density,
-                                &[
-                                    (DensityMode::Standard, "标准"),
-                                    (DensityMode::Compact, "紧凑"),
-                                ],
-                                "快速切换密度",
-                            ) {
-                                self.settings.density_mode = density;
-                                self.apply_visuals_and_save(ctx, "界面密度已更新", false);
-                            }
-
-                            ui.add_space(8.0);
-                            let mut font = self.settings.font_choice;
-                            if segment_bar(
-                                ui,
-                                p,
-                                m,
-                                &mut font,
-                                &[
-                                    (FontChoice::FzGwKai, "楷体"),
-                                    (FontChoice::MicrosoftYaHei, "雅黑"),
-                                ],
-                                "快速切换字体",
-                            ) {
-                                self.settings.font_choice = font;
-                                self.apply_visuals_and_save(ctx, "界面字体已切换", true);
-                            }
-                        });
-                    });
-                } else {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        ui.label(
-                            RichText::new(self.page.title())
-                                .size(m.h1_size)
-                                .color(p.text_primary),
-                        );
-                        ui.label(
-                            RichText::new(self.page.subtitle())
-                                .size(m.secondary_size)
-                                .color(p.text_secondary),
-                        );
-                        ui.add_space(8.0);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
-                            let mut font = self.settings.font_choice;
-                            if segment_bar(
-                                ui,
-                                p,
-                                m,
-                                &mut font,
-                                &[
-                                    (FontChoice::FzGwKai, "楷体"),
-                                    (FontChoice::MicrosoftYaHei, "雅黑"),
-                                ],
-                                "快速切换字体",
-                            ) {
-                                self.settings.font_choice = font;
-                                self.apply_visuals_and_save(ctx, "界面字体已切换", true);
-                            }
-                            let mut density = self.settings.density_mode;
-                            if segment_bar(
-                                ui,
-                                p,
-                                m,
-                                &mut density,
-                                &[
-                                    (DensityMode::Standard, "标准"),
-                                    (DensityMode::Compact, "紧凑"),
-                                ],
-                                "快速切换密度",
-                            ) {
-                                self.settings.density_mode = density;
-                                self.apply_visuals_and_save(ctx, "界面密度已更新", false);
-                            }
-                            let mut is_dark = p.dark;
-                            if segment_bar(
-                                ui,
-                                p,
-                                m,
-                                &mut is_dark,
-                                &[(false, "浅色"), (true, "深色")],
-                                "快速切换主题",
-                            ) {
-                                self.settings.theme_mode = if is_dark {
-                                    ThemeMode::Dark
-                                } else {
-                                    ThemeMode::Light
-                                };
-                                self.apply_visuals_and_save(ctx, "主题模式已更新", false);
-                            }
-                        });
-                    });
-                }
-            });
-    }
-
-    fn render_status_bar(&self, ctx: &egui::Context, p: Palette, m: DensityMetrics) {
-        egui::TopBottomPanel::bottom("status_bar")
-            .frame(
-                egui::Frame::new()
-                    .fill(p.bg_surface)
-                    .inner_margin(egui::Margin::symmetric(20, 8)),
-            )
-            .show(ctx, |ui| {
-                let rect = ui.max_rect().expand2(egui::vec2(20.0, 8.0));
-                ui.painter().line_segment(
-                    [rect.left_top(), rect.right_top()],
-                    Stroke::new(1.0, p.border_subtle),
-                );
+                let left_max_w = (avail_w - 172.0).max(200.0);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&self.status_message)
-                            .size(m.caption_size)
-                            .color(p.text_muted),
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_max_w, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.multiply_opacity(title_opacity);
+                            ui.set_width(left_max_w);
+                            ui.set_max_width(left_max_w);
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            ui.label(
+                                RichText::new(self.page.title())
+                                    .size(m.h1_size)
+                                    .color(p.text_primary),
+                            );
+                            ui.label(
+                                RichText::new(self.page.subtitle())
+                                    .size(m.secondary_size)
+                                    .color(p.text_secondary),
+                            );
+                        },
                     );
+
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let font_label = match self.settings.font_choice {
-                            FontChoice::FzGwKai => "方正公文楷体",
-                            FontChoice::MicrosoftYaHei => "微软雅黑 UI",
+                        let about_kind = if self.modal == ActiveModal::About {
+                            ButtonKind::Primary
+                        } else {
+                            ButtonKind::Secondary
                         };
-                        let right = format!(
-                            "{} · {} · {} · {:.0}% DPI",
-                            if p.dark { "深色模式" } else { "浅色模式" },
-                            if self.settings.density_mode == DensityMode::Compact {
-                                "紧凑密度"
-                            } else {
-                                "标准密度"
-                            },
-                            font_label,
-                            ctx.pixels_per_point() * 100.0
-                        );
-                        ui.label(RichText::new(right).size(m.caption_size).color(p.text_muted));
+                        if styled_button(ui, p, m, "关于", about_kind, true, false).clicked() {
+                            self.open_modal(ActiveModal::About);
+                        }
+
+                        ui.add_space(8.0);
+
+                        let settings_kind = if self.modal == ActiveModal::Settings {
+                            ButtonKind::Primary
+                        } else {
+                            ButtonKind::Secondary
+                        };
+                        if styled_button(ui, p, m, "设置", settings_kind, true, false).clicked() {
+                            self.open_modal(ActiveModal::Settings);
+                        }
                     });
                 });
             });
@@ -846,7 +809,7 @@ impl ShowcaseApp {
                 );
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("Body 正文文字：由 egui 按当前屏幕缩放倍率直接生成高分字形图集，右上角可随时一键对比「楷体 / 雅黑」。")
+                    RichText::new("Body 正文文字：由 egui 按当前屏幕缩放倍率直接生成高分字形图集，点击右上角「设置」可随时切换「楷体 / 雅黑」实时对比。")
                         .size(m.body_size)
                         .color(p.text_primary),
                 );
@@ -1043,21 +1006,14 @@ impl ShowcaseApp {
                 self.scan_progress = 0.0;
                 self.scan_last_tick = Some(Instant::now());
                 self.scan_status_text = "正在核查文件哈希（0%）…".to_owned();
-                self.status_message = "模拟后台核查已启动，界面保持可交互".to_owned();
                 ctx.request_repaint_after(Duration::from_millis(160));
             }
             if do_cancel_scan {
                 self.scanning = false;
                 self.scan_status_text = format!("已在 {:.0}% 处取消", self.scan_progress * 100.0);
-                self.status_message = "已取消模拟核查任务".to_owned();
             }
             if do_toggle_empty {
                 self.simulate_empty = !self.simulate_empty;
-                self.status_message = if self.simulate_empty {
-                    "已切换为空状态规范演示".to_owned()
-                } else {
-                    "已恢复示例任务列表".to_owned()
-                };
             }
             if do_reset {
                 self.tasks = initial_tasks();
@@ -1068,7 +1024,6 @@ impl ShowcaseApp {
                 self.scanning = false;
                 self.scan_progress = 0.0;
                 self.scan_status_text.clear();
-                self.status_message = "已重置典型工具界面演示数据".to_owned();
             }
         });
 
@@ -1185,7 +1140,6 @@ impl ShowcaseApp {
                             self.search_query.clear();
                             self.status_filter = "全部状态";
                             self.simulate_empty = false;
-                            self.status_message = "已恢复示例任务列表".to_owned();
                         }
                         if styled_button(
                             ui,
@@ -1384,6 +1338,7 @@ impl ShowcaseApp {
         }
         if let Some(id) = delete_id {
             self.confirm_delete_id = Some(id);
+            self.open_modal(ActiveModal::ConfirmDelete);
         }
     }
 
@@ -1414,8 +1369,7 @@ impl ShowcaseApp {
                     ("禁用态次按钮", ButtonKind::Secondary, false),
                 ] {
                     if styled_button(ui, p, m, label, kind, enabled, false).clicked() {
-                        self.demo_feedback = format!("已触发「{label}」，状态栏已同步反馈。");
-                        self.status_message = format!("控件演示：已执行「{label}」");
+                        self.demo_feedback = format!("已触发「{label}」，交互反馈已更新。");
                     }
                 }
             });
@@ -1654,7 +1608,7 @@ impl ShowcaseApp {
         self.demo_segment = demo_segment;
         self.demo_slider = demo_slider;
         if let Some(msg) = status_update {
-            self.status_message = msg;
+            self.demo_feedback = msg;
         }
 
         ui.add_space(m.section_gap);
@@ -1912,7 +1866,7 @@ impl ShowcaseApp {
                 p,
                 m,
                 &mut auto,
-                "登录时启动（同步写入当前用户启动项注册表）",
+                "登录时启动（在 Windows 启动文件夹创建或移除快捷方式）",
             )
             .changed()
             {
@@ -1927,12 +1881,10 @@ impl ShowcaseApp {
                         };
                         self.settings_feedback = msg.to_owned();
                         self.settings_has_error = false;
-                        self.status_message = msg.to_owned();
                     }
                     Err(err) => {
-                        self.settings_feedback = err.clone();
+                        self.settings_feedback = err;
                         self.settings_has_error = true;
-                        self.status_message = err;
                     }
                 }
             }
@@ -1963,7 +1915,7 @@ impl ShowcaseApp {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(
-                        RichText::new("当前登录启动项注册状态：")
+                        RichText::new("当前启动文件夹快捷方式状态：")
                             .size(m.caption_size)
                             .color(p.text_muted),
                     );
@@ -2101,76 +2053,111 @@ impl ShowcaseApp {
         });
     }
 
-    fn render_confirm_modal(&mut self, ctx: &egui::Context, p: Palette, m: DensityMetrics) {
-        let Some(target_id) = self.confirm_delete_id.clone() else {
-            return;
-        };
-        let target_name = self
-            .tasks
-            .iter()
-            .find(|t| t.id == target_id)
-            .map(|t| t.file_name)
-            .unwrap_or("选中记录");
-
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.confirm_delete_id = None;
-            self.status_message = "已取消移除操作".to_owned();
-            return;
-        }
-
-        // 模态遮罩
-        let screen = ctx.viewport_rect();
-        egui::Area::new(egui::Id::new("confirm_scrim"))
-            .fixed_pos(screen.min)
-            .order(egui::Order::Middle)
-            .show(ctx, |ui| {
-                let (_, resp) = ui.allocate_exact_size(screen.size(), egui::Sense::click());
-                ui.painter()
-                    .rect_filled(screen, CornerRadius::ZERO, Color32::from_black_alpha(110));
-                if resp.clicked() {
-                    self.confirm_delete_id = None;
-                }
-            });
-
-        egui::Window::new("确认移除演示记录")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .fixed_size([420.0, 170.0])
-            .order(egui::Order::Foreground)
-            .frame(
-                egui::Frame::new()
-                    .fill(p.bg_surface)
-                    .stroke(Stroke::new(1.0, p.border_control))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(egui::Margin::same(22)),
-            )
-            .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "确定要从当前演示列表中移除「{target_name}」吗？\n\n此操作仅影响界面演示数据，不会删除磁盘上的任何真实文件。"
-                    ))
-                    .size(m.body_size)
-                    .color(p.text_secondary),
+    fn render_active_modal(&mut self, ctx: &egui::Context, p: Palette, m: DensityMetrics) {
+        match self.modal {
+            ActiveModal::None => {}
+            ActiveModal::Settings => {
+                let opened_at = self.modal_opened_at;
+                let closed = centered_modal(
+                    ctx,
+                    p,
+                    m,
+                    "settings_modal",
+                    "主题与设置",
+                    opened_at,
+                    720.0,
+                    620.0,
+                    |ui| {
+                        self.render_settings(ctx, ui, p, m);
+                    },
                 );
-                ui.add_space(18.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if styled_button(ui, p, m, "确认移除", ButtonKind::Danger, true, false)
-                        .clicked()
-                    {
+                if closed {
+                    self.close_modal();
+                }
+            }
+            ActiveModal::About => {
+                let opened_at = self.modal_opened_at;
+                let closed = centered_modal(
+                    ctx,
+                    p,
+                    m,
+                    "about_modal",
+                    "关于与环境",
+                    opened_at,
+                    580.0,
+                    440.0,
+                    |ui| {
+                        self.render_about(ctx, ui, p, m);
+                    },
+                );
+                if closed {
+                    self.close_modal();
+                }
+            }
+            ActiveModal::ConfirmDelete => {
+                let Some(target_id) = self.confirm_delete_id.clone() else {
+                    self.close_modal();
+                    return;
+                };
+                let target_name = self
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == target_id)
+                    .map(|t| t.file_name)
+                    .unwrap_or("选中记录")
+                    .to_owned();
+                let opened_at = self.modal_opened_at;
+                let mut action: Option<bool> = None;
+
+                let closed = centered_modal(
+                    ctx,
+                    p,
+                    m,
+                    "confirm_delete_modal",
+                    "确认移除演示记录",
+                    opened_at,
+                    440.0,
+                    220.0,
+                    |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "确定要从当前演示列表中移除「{target_name}」吗？\n\n此操作仅影响界面演示数据，不会删除磁盘上的任何真实文件。"
+                            ))
+                            .size(m.body_size)
+                            .color(p.text_secondary),
+                        );
+                        ui.add_space(18.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if styled_button(ui, p, m, "确认移除", ButtonKind::Danger, true, false)
+                                .clicked()
+                            {
+                                action = Some(true);
+                            }
+                            ui.add_space(8.0);
+                            if styled_button(ui, p, m, "取消", ButtonKind::Secondary, true, false)
+                                .clicked()
+                            {
+                                action = Some(false);
+                            }
+                        });
+                    },
+                );
+
+                match action {
+                    Some(true) => {
                         self.tasks.retain(|t| t.id != target_id);
-                        self.confirm_delete_id = None;
-                        self.status_message = format!("已移除演示记录「{target_name}」");
+                        self.close_modal();
                     }
-                    ui.add_space(8.0);
-                    if styled_button(ui, p, m, "取消", ButtonKind::Secondary, true, false)
-                        .clicked()
-                    {
-                        self.confirm_delete_id = None;
-                        self.status_message = "已取消移除操作".to_owned();
+                    Some(false) => {
+                        self.close_modal();
                     }
-                });
-            });
+                    None if closed => {
+                        self.close_modal();
+                    }
+                    None => {}
+                }
+            }
+        }
     }
 }
 
@@ -2190,15 +2177,14 @@ impl eframe::App for ShowcaseApp {
         {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
-            self.status_message = "主窗口已隐藏到系统托盘，单击或右键托盘图标可重新打开".to_owned();
         }
 
         let p = resolve_palette(self.settings.theme_mode, self.settings.accent_preset);
         let m = DensityMetrics::from_mode(self.settings.density_mode, self.settings.font_choice);
+        let (page_opacity, page_offset) = self.page_transition_state(ctx);
 
         self.render_sidebar(ctx, p, m);
-        self.render_header(ctx, p, m);
-        self.render_status_bar(ctx, p, m);
+        self.render_header(ctx, p, m, page_opacity);
 
         egui::CentralPanel::default()
             .frame(
@@ -2209,16 +2195,28 @@ impl eframe::App for ShowcaseApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
-                    .show(ui, |ui| match self.page {
-                        Page::Overview => self.render_overview(ui, p, m),
-                        Page::Workbench => self.render_workbench(ctx, ui, p, m),
-                        Page::Controls => self.render_controls(ui, p, m),
-                        Page::Settings => self.render_settings(ctx, ui, p, m),
-                        Page::About => self.render_about(ctx, ui, p, m),
+                    .show(ui, |ui| {
+                        if page_opacity < 1.0 || page_offset != egui::Vec2::ZERO {
+                            let shifted = ui.available_rect_before_wrap().translate(page_offset);
+                            ui.scope_builder(egui::UiBuilder::new().max_rect(shifted), |ui| {
+                                ui.multiply_opacity(page_opacity);
+                                match self.page {
+                                    Page::Overview => self.render_overview(ui, p, m),
+                                    Page::Workbench => self.render_workbench(ctx, ui, p, m),
+                                    Page::Controls => self.render_controls(ui, p, m),
+                                }
+                            });
+                        } else {
+                            match self.page {
+                                Page::Overview => self.render_overview(ui, p, m),
+                                Page::Workbench => self.render_workbench(ctx, ui, p, m),
+                                Page::Controls => self.render_controls(ui, p, m),
+                            }
+                        }
                     });
             });
 
-        self.render_confirm_modal(ctx, p, m);
+        self.render_active_modal(ctx, p, m);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

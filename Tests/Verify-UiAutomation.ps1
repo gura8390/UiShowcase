@@ -27,9 +27,11 @@ if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force }
 New-Item -ItemType Directory -Path $testDir -Force | Out-Null
 
 $testConfigPath = Join-Path $testDir "settings.json"
+$testStartupDir = Join-Path $testDir "Startup"
+New-Item -ItemType Directory -Path $testStartupDir -Force | Out-Null
 $testAutoRunName = "澄明界面展示_UIA验收临时项"
+$testShortcutPath = Join-Path $testStartupDir "$testAutoRunName.lnk"
 $testMutexName = "UiShowcase_Rust_UIA_$(Get-Random)"
-$runRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 
 $results = [System.Collections.Generic.List[string]]::new()
 function Add-Pass([string]$msg) {
@@ -123,6 +125,7 @@ function Start-IsolatedApp([string[]]$extraArgs = @()) {
         $psi.Arguments = ($extraArgs | ForEach-Object { "`"$_`"" }) -join " "
     }
     $psi.Environment["UISHOWCASE_CONFIG_PATH"] = $testConfigPath
+    $psi.Environment["UISHOWCASE_STARTUP_DIR"] = $testStartupDir
     $psi.Environment["UISHOWCASE_AUTORUN_NAME"] = $testAutoRunName
     $psi.Environment["UISHOWCASE_MUTEX_NAME"] = $testMutexName
     return [System.Diagnostics.Process]::Start($psi)
@@ -132,8 +135,8 @@ $proc1 = $null
 $proc2 = $null
 
 try {
-    if (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue) {
-        Remove-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue
+    if (Test-Path $testShortcutPath) {
+        Remove-Item $testShortcutPath -Force -ErrorAction SilentlyContinue
     }
 
     # 1. 验证 PE 内嵌图标
@@ -210,51 +213,104 @@ try {
     if ($h1El.Current.BoundingRectangle.Bottom -gt ($h2El.Current.BoundingRectangle.Top + 2)) {
         throw "字体层级 H1 与 H2 未纵向堆叠（H1.Bottom=$($h1El.Current.BoundingRectangle.Bottom), H2.Top=$($h2El.Current.BoundingRectangle.Top)）"
     }
-    # 验证顶栏三组快捷切换控件尺寸与风格完全一致，且与副标题保持充足间距
-    $hdrFont = Find-ByName $win "快速切换字体：楷体" 3000
-    $hdrDens = Find-ByName $win "快速切换密度：标准" 3000
-    $hdrThemeLight = Find-ByName $win "快速切换主题：浅色" 3000
-    $hdrThemeDark = Find-ByName $win "快速切换主题：深色" 3000
-    if ($null -eq $hdrFont -or $null -eq $hdrDens -or $null -eq $hdrThemeLight -or $null -eq $hdrThemeDark) {
-        throw "顶栏三组统一分段切换控件缺失"
+    # 验证左侧分栏约 1:9 比例，仅保留 3 个内容页；右上角放置「设置」「关于」，无原快捷切换控件
+    $winRectFull = $win.Current.BoundingRectangle
+    $navRect = $navOverview.Current.BoundingRectangle
+    $navRatio = $navRect.Width / $winRectFull.Width
+    if ($navRatio -lt 0.05 -or $navRatio -gt 0.16) {
+        throw "左侧导航栏占比偏离 1:9 目标（导航项宽=$($navRect.Width)，窗口宽=$($winRectFull.Width)，比例=$([math]::Round($navRatio, 3))）"
     }
-    if ([math]::Abs($hdrFont.Current.BoundingRectangle.Height - $hdrThemeLight.Current.BoundingRectangle.Height) -gt 2 -or
-        [math]::Abs($hdrDens.Current.BoundingRectangle.Height - $hdrThemeLight.Current.BoundingRectangle.Height) -gt 2) {
-        throw "顶栏三组快捷切换控件高度不一致"
+    if ($null -ne (Find-ByName $win "导航：主题与设置" 250) -or $null -ne (Find-ByName $win "导航：关于与环境" 250)) {
+        throw "左侧分栏不应再保留「主题与设置」或「关于与环境」"
+    }
+    if ($null -ne (Find-ByName $win "退出应用" 250) -or $null -ne (Find-ByName $win "退出" 250)) {
+        throw "左下角不应存在第二个退出按钮（仅保留右上角窗口关闭键）"
+    }
+    if ($null -ne (Find-ByNameContains $win "原生渲染已启动" 250) -or $null -ne (Find-ByNameContains $win "% DPI" 250)) {
+        throw "正文下方不应存在低信息含量的底部状态栏"
+    }
+    if ($null -ne (Find-ByName $win "快速切换字体：楷体" 250) -or $null -ne (Find-ByName $win "快速切换主题：浅色" 250)) {
+        throw "顶栏不应再保留原快速切换字体/密度/主题分段控件"
+    }
+    $hdrSettings = Find-ByName $win "设置" 3000
+    $hdrAbout = Find-ByName $win "关于" 3000
+    if ($null -eq $hdrSettings -or $null -eq $hdrAbout) {
+        throw "右上角「设置」或「关于」按钮缺失"
+    }
+    if ($hdrSettings.Current.BoundingRectangle.Left -ge $hdrAbout.Current.BoundingRectangle.Left) {
+        throw "右上角按钮顺序不符（应为「设置」在左、「关于」在右）"
     }
     if ($null -eq (Find-ByNameContains $win "#F6F7F9" 3000)) {
         throw "浅色模式下未读取到 BgCanvas 色值 #F6F7F9"
     }
-    Trigger-Control $hdrThemeDark "快速切换主题：深色"
-    Start-Sleep -Milliseconds 350
-    if ($null -eq (Find-ByNameContains $win "#181A1F" 3000)) {
-        throw "切换深色后色板未实时刷新为 #181A1F"
-    }
-    Trigger-Control (Find-ByName $win "快速切换主题：浅色" 3000) "快速切换主题：浅色"
-    Start-Sleep -Milliseconds 300
-    Add-Pass "总览页原则卡等高、顶栏三组切换统一、语义色板与浅/深色切换通过（#F6F7F9 <-> #181A1F）"
+    Add-Pass "左侧 1:9 分栏、右上角「设置 / 关于」布局与总览页原则卡/色板核验通过（侧栏占比=$([math]::Round($navRatio * 100, 1))%）"
 
-    # 4. 验证标准/紧凑密度真实改变控件渲染高度
+    # 4. 打开居中「设置」弹窗：验证字体切换、浅/深色切换、紧凑密度收缩与启动文件夹 .lnk 快捷方式管理
     $stdH = [math]::Round((Find-ByName $win "导航：总览与色板").Current.BoundingRectangle.Height, 1)
-    Trigger-Control (Find-ByName $win "快速切换密度：紧凑") "快速切换密度：紧凑"
+    Trigger-Control $hdrSettings "右上角设置按钮"
+    Start-Sleep -Milliseconds 350
+    $closeModalBtn = Find-ByName $win "关闭弹窗" 3000
+    if ($null -eq $closeModalBtn) {
+        throw "点击「设置」后未弹出居中设置窗口"
+    }
+
+    # 字体实时切换（雅黑 <-> 楷体），并确认临时切页动画选型项已移除
+    Trigger-Control (Find-ByName $win "界面字体：微软雅黑 UI" 3000) "界面字体：微软雅黑 UI"
     Start-Sleep -Milliseconds 300
+    if (-not (Get-IsSelected (Find-ByName $win "界面字体：微软雅黑 UI" 3000))) {
+        throw "设置弹窗切换微软雅黑 UI 后未保持选中状态"
+    }
+    Trigger-Control (Find-ByName $win "界面字体：方正公文楷体" 3000) "界面字体：方正公文楷体"
+    Start-Sleep -Milliseconds 300
+    if ($null -ne (Find-ByName $win "切页动画预览：纯淡入" 200)) {
+        throw "临时切页动画选型切换项尚未移除"
+    }
+
+    # 深色模式 + 强调色 + 紧凑密度
+    Trigger-Control (Find-ByName $win "主题模式：深色模式" 3000) "主题模式：深色模式"
+    Start-Sleep -Milliseconds 250
+    Trigger-Control (Find-ByName $win "强调色：青瓷绿" 3000) "强调色：青瓷绿"
+    Start-Sleep -Milliseconds 250
+    Trigger-Control (Find-ByName $win "界面密度：紧凑密度" 3000) "界面密度：紧凑密度"
+    Start-Sleep -Milliseconds 300
+
+    # 启动文件夹快捷方式创建与移除（禁止写注册表）
+    $autoToggle = Find-ByName $win "登录时启动（在 Windows 启动文件夹创建或移除快捷方式）" 3000
+    if ($null -eq $autoToggle) {
+        throw "设置弹窗未找到启动文件夹方式的自启动开关"
+    }
+    Trigger-Control $autoToggle "启用登录时启动"
+    Start-Sleep -Milliseconds 350
+    if (-not (Test-Path $testShortcutPath) -or (Get-Item $testShortcutPath).Length -lt 64) {
+        throw "启用登录自启动后未在启动文件夹生成有效 .lnk 快捷方式：$testShortcutPath"
+    }
+    Trigger-Control (Find-ByName $win "登录时启动（在 Windows 启动文件夹创建或移除快捷方式）" 3000) "停用登录时启动"
+    Start-Sleep -Milliseconds 350
+    if (Test-Path $testShortcutPath) {
+        throw "停用登录自启动后未移除启动文件夹快捷方式：$testShortcutPath"
+    }
+
+    # 关闭设置弹窗并校验深色色板与紧凑密度高度生效
+    Trigger-Control (Find-ByName $win "关闭弹窗" 3000) "关闭设置弹窗"
+    Start-Sleep -Milliseconds 300
+    if ($null -eq (Find-ByNameContains $win "#181A1F" 3000)) {
+        throw "设置弹窗切换深色后色板未实时刷新为 #181A1F"
+    }
     $compactH = [math]::Round((Find-ByName $win "导航：总览与色板").Current.BoundingRectangle.Height, 1)
     if ($compactH -ge ($stdH - 4)) {
         throw "切换紧凑密度后导航项实际高度未收缩（标准=$stdH，紧凑=$compactH）"
     }
-    Trigger-Control (Find-ByName $win "快速切换密度：标准") "快速切换密度：标准"
-    Start-Sleep -Milliseconds 250
-    Add-Pass "标准/紧凑密度布局收缩通过（导航项高度 $stdH -> $compactH px）"
+    Add-Pass "居中「设置」弹窗：字体/深色/青瓷绿/紧凑密度（$stdH -> $compactH px）与启动文件夹 .lnk 自启动验收通过"
 
-    # 5. 验证顶栏实时字体切换（楷体 <-> 雅黑）
-    Trigger-Control (Find-ByName $win "快速切换字体：雅黑") "快速切换字体：雅黑"
-    Start-Sleep -Milliseconds 300
-    if ($null -eq (Find-ByNameContains $win "微软雅黑 UI" 3000)) {
-        throw "切换微软雅黑 UI 后状态栏未同步更新"
+    # 5. 打开居中「关于」弹窗：验证 OpenGL (glow) 与 DPI 读数
+    Trigger-Control (Find-ByName $win "关于" 3000) "右上角关于按钮"
+    Start-Sleep -Milliseconds 350
+    if ($null -eq (Find-ByNameContains $win "OpenGL (glow)" 3000)) {
+        throw "关于弹窗未显示 OpenGL (glow) 渲染后端信息"
     }
-    Trigger-Control (Find-ByName $win "快速切换字体：楷体") "快速切换字体：楷体"
+    Trigger-Control (Find-ByName $win "关闭弹窗" 3000) "关闭关于弹窗"
     Start-Sleep -Milliseconds 300
-    Add-Pass "顶栏字体实时切换（方正公文楷体 <-> 微软雅黑 UI）通过"
+    Add-Pass "居中「关于」弹窗弹出、DPI/glow 读数与关闭验收通过"
 
     # 6. 典型工具界面：空闲不显示待机进度 + 列表四列不越界重叠 + 自定义下拉 + 空状态 + 二次确认
     Trigger-Control (Find-ByName $win "导航：典型工具界面") "导航：典型工具界面"
@@ -380,59 +436,28 @@ try {
     }
     Add-Pass "控件页双列与状态反馈 2×2 网格几何对齐、五态反馈、内联报错与开关 TogglePattern 验收通过"
 
-    # 8. 主题与设置：深色 + 青瓷绿 + 紧凑密度 + 登录自启注册表写入/清除
-    Trigger-Control (Find-ByName $win "导航：主题与设置") "导航：主题与设置"
-    Start-Sleep -Milliseconds 250
-    Trigger-Control (Find-ByName $win "主题模式：深色模式") "主题模式：深色模式"
-    Start-Sleep -Milliseconds 200
-    Trigger-Control (Find-ByName $win "强调色：青瓷绿") "强调色：青瓷绿"
-    Start-Sleep -Milliseconds 200
-    Trigger-Control (Find-ByName $win "界面密度：紧凑密度") "界面密度：紧凑密度"
-    Start-Sleep -Milliseconds 250
-
-    $autoToggle = Find-ByName $win "登录时启动（同步写入当前用户启动项注册表）"
-    Trigger-Control $autoToggle "登录时启动"
-    Start-Sleep -Milliseconds 300
-    $regVal = (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue).$testAutoRunName
-    if ([string]::IsNullOrWhiteSpace($regVal) -or $regVal -notlike "*--minimized*") {
-        throw "登录启动项写入验证失败，实际值：$regVal"
-    }
-    Trigger-Control (Find-ByName $win "登录时启动（同步写入当前用户启动项注册表）") "停用登录时启动"
-    Start-Sleep -Milliseconds 300
-    if ($null -ne (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue).$testAutoRunName) {
-        throw "停用登录启动项后未清除注册表项"
-    }
-    Add-Pass "设置页主题/强调色/密度切换与 HKCU Run 启动项写入/清除验收通过"
-
-    # 9. 关于与环境页检查
-    Trigger-Control (Find-ByName $win "导航：关于与环境") "导航：关于与环境"
-    Start-Sleep -Milliseconds 250
-    if ($null -eq (Find-ByNameContains $win "OpenGL (glow)" 3000)) {
-        throw "关于页未显示 OpenGL (glow) 渲染后端信息"
-    }
-    Add-Pass "关于与环境页 DPI/glow 后端读数验收通过"
-
-    # 9.5 最小窗口（820×540 逻辑尺寸）窄窗响应式零溢出核验
+    # 8. 最小窗口（820×540 逻辑尺寸）窄窗响应式零溢出与侧栏 1:9 比例跟随核验
     $tfObj = $null
     if ($win.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern, [ref]$tfObj)) {
-        # 切换回标准密度便于检验最宽侧边栏（232pt）下的最小窗口极限布局
-        Trigger-Control (Find-ByName $win "快速切换密度：标准" 3000) "切换标准密度"
-        Start-Sleep -Milliseconds 200
         $origW = $win.Current.BoundingRectangle.Width
         $origH = $win.Current.BoundingRectangle.Height
-        # 按当前窗口缩放估算出 820×540 物理像素（150% 下约 1230×810，100% 下 820×540）
         $scale = if ($stdH -gt 0) { $stdH / 40.0 } else { 1.0 }
         $minPhysW = [math]::Round(820.0 * $scale)
         $minPhysH = [math]::Round(540.0 * $scale)
         $tfObj.Resize($minPhysW, $minPhysH)
-        Start-Sleep -Milliseconds 350
-        $wRight = $win.Current.BoundingRectangle.Right
+        Start-Sleep -Milliseconds 400
+        $wRectMin = $win.Current.BoundingRectangle
+        $wRight = $wRectMin.Right
+        $minNavW = (Find-ByName $win "导航：总览与色板" 3000).Current.BoundingRectangle.Width
+        $minNavRatio = $minNavW / $wRectMin.Width
+        if ($minNavRatio -lt 0.05 -or $minNavRatio -gt 0.16) {
+            throw "最小窗口下左侧分栏未按 1:9 比例缩放（导航宽=$minNavW，窗口宽=$($wRectMin.Width)）"
+        }
 
         foreach ($navCheck in @(
             @{ Nav = "导航：总览与色板"; Probe = "原则卡片：04 · 居中与无障碍" },
             @{ Nav = "导航：典型工具界面"; Probe = "搜索核查记录" },
-            @{ Nav = "导航：控件与交互态"; Probe = "并发扫描阈值" },
-            @{ Nav = "导航：主题与设置"; Probe = "强调色：琥珀金" }
+            @{ Nav = "导航：控件与交互态"; Probe = "并发扫描阈值" }
         )) {
             Trigger-Control (Find-ByName $win $navCheck.Nav 3000) $navCheck.Nav
             Start-Sleep -Milliseconds 250
@@ -445,17 +470,23 @@ try {
             }
         }
         $tfObj.Resize($origW, $origH)
-        Start-Sleep -Milliseconds 250
-        # 恢复紧凑密度以保持后续持久化验收一致
-        Trigger-Control (Find-ByName $win "快速切换密度：紧凑" 3000) "恢复紧凑密度"
-        Start-Sleep -Milliseconds 250
-        Add-Pass "最小窗口（820×540）全站四页面窄窗响应式零横向溢出验收通过"
+        Start-Sleep -Milliseconds 300
+        Add-Pass "最小窗口（820×540）侧栏 1:9 缩放与三页面零横向溢出验收通过（占比=$([math]::Round($minNavRatio * 100, 1))%）"
     }
 
-    # 10. 正常退出应用
-    Trigger-Control (Find-ByName $win "退出应用") "退出应用"
-    if (-not $proc1.WaitForExit(5000)) { throw "点击退出应用后进程未在 5 秒内退出" }
-    Add-Pass "通过导航栏「退出应用」干净退出"
+    # 10. 正常退出应用（无 Shell_TrayWnd 时通过右上角唯一窗口关闭键退出，有托盘时通过托盘退出通道退出）
+    $ctrlCls = "${testMutexName}_Control"
+    $WM_APP_EXIT = [uint32](0x8000 + 4)
+    $shellTray = [NativeDpiCheck]::FindWindow("Shell_TrayWnd", $null)
+    if ($shellTray -eq [IntPtr]::Zero) {
+        $winPat1 = $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        $winPat1.Close()
+    } else {
+        $ctrl1 = [NativeDpiCheck]::FindWindow($ctrlCls, $ctrlCls)
+        [void][NativeDpiCheck]::PostMessage($ctrl1, $WM_APP_EXIT, [IntPtr]::Zero, [IntPtr]::Zero)
+    }
+    if (-not $proc1.WaitForExit(5000)) { throw "触发唯一关闭入口后进程未在 5 秒内退出" }
+    Add-Pass "通过唯一窗口关闭入口干净退出"
 
     # 11. 重启持久化 + 单实例排他验证
     $savedJson = Get-Content $testConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -469,11 +500,13 @@ try {
     if ($null -eq (Find-ByNameContains $win2 "#181A1F" 4000)) {
         throw "重启后深色主题未实际加载生效"
     }
-    Trigger-Control (Find-ByName $win2 "导航：主题与设置") "导航：主题与设置"
-    Start-Sleep -Milliseconds 250
+    Trigger-Control (Find-ByName $win2 "设置" 3000) "重启后打开设置弹窗"
+    Start-Sleep -Milliseconds 350
     if (-not (Get-IsSelected (Find-ByName $win2 "主题模式：深色模式"))) { throw "深色模式未持久化" }
     if (-not (Get-IsSelected (Find-ByName $win2 "强调色：青瓷绿"))) { throw "青瓷绿强调色未持久化" }
     if (-not (Get-IsSelected (Find-ByName $win2 "界面密度：紧凑密度"))) { throw "紧凑密度未持久化" }
+    Trigger-Control (Find-ByName $win2 "关闭弹窗" 3000) "关闭重启后设置弹窗"
+    Start-Sleep -Milliseconds 250
     Add-Pass "重启后深色模式、青瓷绿强调色与紧凑密度真实持久化验收通过"
 
     # 单实例排他验证
@@ -488,7 +521,6 @@ try {
     Add-Pass "单实例 Mutex 排他验收通过（重复进程静默退出，已有实例保持运行）"
 
     # 托盘状态检查（若存在 Shell_TrayWnd 则验证关闭隐藏到托盘）
-    $shellTray = [NativeDpiCheck]::FindWindow("Shell_TrayWnd", $null)
     if ($shellTray -ne [IntPtr]::Zero) {
         $winPat = $win2.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
         $winPat.Close()
@@ -499,19 +531,19 @@ try {
         $win2 = Find-WindowByPid -pidTarget $proc2.Id -timeoutMs 4000
         if ($null -eq $win2) { throw "重复启动未能唤回隐藏在托盘中的主窗口" }
         Add-Pass "关闭隐藏到托盘与重复启动唤回主窗口验收通过"
+        $ctrl2 = [NativeDpiCheck]::FindWindow($ctrlCls, $ctrlCls)
+        [void][NativeDpiCheck]::PostMessage($ctrl2, $WM_APP_EXIT, [IntPtr]::Zero, [IntPtr]::Zero)
     } else {
         Write-Host "[INFO] 当前会话为无 Shell_TrayWnd 的独立测试桌面，跳过系统托盘图标隐藏/唤回实测。" -ForegroundColor Yellow
+        $winPat2 = $win2.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        $winPat2.Close()
     }
-
-    Trigger-Control (Find-ByName $win2 "退出应用") "退出应用"
     if (-not $proc2.WaitForExit(5000)) {
         $proc2.Kill()
         throw "第二次实例退出失败"
     }
 
     # 12. 隐藏窗口（--minimized）下的托盘唤醒与托盘退出事件闭环测试
-    $ctrlCls = "${testMutexName}_Control"
-    $WM_APP_EXIT = [uint32](0x8000 + 4)
 
     $procHidden = Start-IsolatedApp @("--minimized")
     try {
@@ -570,9 +602,6 @@ try {
 finally {
     if ($proc1 -and -not $proc1.HasExited) { $proc1.Kill() }
     if ($proc2 -and -not $proc2.HasExited) { $proc2.Kill() }
-    if (Get-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue) {
-        Remove-ItemProperty -Path $runRegPath -Name $testAutoRunName -ErrorAction SilentlyContinue
-    }
     if (Test-Path $testDir) {
         Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
     }

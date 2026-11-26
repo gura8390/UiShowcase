@@ -44,7 +44,6 @@ pub struct Palette {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DensityMetrics {
-    pub nav_width: f32,
     pub header_pad_x: i8,
     pub header_pad_y: i8,
     pub page_pad: i8,
@@ -66,7 +65,6 @@ impl DensityMetrics {
         let kai_bump = if font == FontChoice::FzGwKai { 1.0 } else { 0.0 };
         match mode {
             DensityMode::Standard => Self {
-                nav_width: 232.0,
                 header_pad_x: 26,
                 header_pad_y: 16,
                 page_pad: 24,
@@ -83,7 +81,6 @@ impl DensityMetrics {
                 h3_size: 15.0 + kai_bump,
             },
             DensityMode::Compact => Self {
-                nav_width: 196.0,
                 header_pad_x: 16,
                 header_pad_y: 10,
                 page_pad: 14,

@@ -2600,13 +2600,14 @@ dependencies = [
 
 [[package]]
 name = "ui-showcase"
-version = "0.0.2-p2"
+version = "0.0.2-p3"
 dependencies = [
  "eframe",
  "image",
  "raw-window-handle",
  "serde",
  "serde_json",
+ "windows",
  "windows-sys 0.61.2",
  "winit",
 ]
